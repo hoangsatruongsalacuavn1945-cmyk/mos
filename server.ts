@@ -3,6 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { THEORY_QUESTIONS } from './src/data/theoryQuestions.ts';
+import aiRoutes from './server/routes/aiRoutes.ts';
 
 dotenv.config();
 
@@ -14,6 +16,9 @@ const PORT = process.env.NODE_ENV === 'production' && process.env.PORT ? parseIn
 const HOST = '0.0.0.0';
 
 app.use(express.json());
+
+// Mount modular AI Proxy router (API keys protected on server side)
+app.use('/api/gemini', aiRoutes);
 
 // Initialize GoogleGenAI client according to SKILL guidelines
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -228,8 +233,25 @@ interface SubmissionRecord {
     officialRibbonPath: string;
     explanation: string;
   }>;
+  violationsCount?: number;
+  antiCheatLogs?: string[];
   status: 'pending' | 'reviewed';
 }
+
+interface ActiveExamSession {
+  sessionId: string;
+  studentId: string;
+  studentName: string;
+  studentCode: string;
+  subject: 'word' | 'excel' | 'powerpoint' | 'mixed';
+  startTime: number;
+  durationSeconds: number;
+  questionIds: string[];
+  violationsCount: number;
+  antiCheatLogs: string[];
+}
+
+const activeExamSessions = new Map<string, ActiveExamSession>();
 
 // In-memory submissions store pre-populated with realistic student submissions
 let submissionsStore: SubmissionRecord[] = [
@@ -347,6 +369,216 @@ let submissionsStore: SubmissionRecord[] = [
   },
 ];
 
+// ==========================================
+// SECURE SERVER-SIDE EXAM ENGINE (ANTI-CHEAT & QUESTION BANK PROTECTION)
+// ==========================================
+
+// Endpoint: Start new exam session with sanitized questions (No answers exposed to client!)
+app.post('/api/exam/start', (req: Request, res: Response) => {
+  try {
+    const { subject = 'all', studentId, studentName, studentCode } = req.body;
+    let pool = THEORY_QUESTIONS;
+    if (subject && subject !== 'all') {
+      pool = THEORY_QUESTIONS.filter(q => q.subject === subject);
+    }
+    if (pool.length === 0) pool = THEORY_QUESTIONS;
+
+    // Shuffle and pick 15 questions (or up to pool size)
+    const shuffled = [...pool].sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, Math.min(15, shuffled.length));
+    const sessionId = 'exam-ses-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+
+    const session: ActiveExamSession = {
+      sessionId,
+      studentId: studentId || 'stu-guest',
+      studentName: studentName || 'Học Viên',
+      studentCode: studentCode || 'HV-' + Math.floor(1000 + Math.random() * 9000),
+      subject: subject as any,
+      startTime: Date.now(),
+      durationSeconds: 50 * 60,
+      questionIds: selected.map(q => q.id),
+      violationsCount: 0,
+      antiCheatLogs: [],
+    };
+    activeExamSessions.set(sessionId, session);
+
+    // CRITICAL SECURITY: Strip answers, explanations, and ribbon tips!
+    // Student inspecting DevTools / Network tab CANNOT see correct answers!
+    const sanitizedQuestions = selected.map(q => ({
+      id: q.id,
+      subject: q.subject,
+      domainId: q.domainId,
+      domainName: q.domainName,
+      difficulty: q.difficulty,
+      type: q.type,
+      title: q.title,
+      scenario: q.scenario,
+      options: q.options,
+      points: q.points,
+    }));
+
+    console.log(`[Exam Security] Started session ${sessionId} for ${session.studentName} (${session.subject}) with ${sanitizedQuestions.length} sanitized questions.`);
+    return res.json({
+      sessionId,
+      subject,
+      durationSeconds: session.durationSeconds,
+      totalQuestions: sanitizedQuestions.length,
+      questions: sanitizedQuestions,
+    });
+  } catch (err: any) {
+    console.error('Error starting exam session:', err);
+    return res.status(500).json({ error: err?.message || 'Lỗi khởi tạo kỳ thi.' });
+  }
+});
+
+// Endpoint: Anti-Cheat Violation event logger
+app.post('/api/exam/violation', (req: Request, res: Response) => {
+  try {
+    const { sessionId, reason, timestamp } = req.body;
+    const session = activeExamSessions.get(sessionId);
+    if (session) {
+      session.violationsCount += 1;
+      const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString('vi-VN') : new Date().toLocaleTimeString('vi-VN');
+      const logEntry = `[${timeStr}] ${reason || 'Phát hiện chuyển tab hoặc mất tiêu điểm màn hình thi'}`;
+      session.antiCheatLogs.push(logEntry);
+      console.warn(`[Anti-Cheat Warning] Session ${sessionId} (${session.studentName}): ${logEntry} (Tổng: ${session.violationsCount})`);
+      return res.json({
+        success: true,
+        violationsCount: session.violationsCount,
+        logs: session.antiCheatLogs,
+      });
+    }
+    return res.json({ success: false, message: 'Session not active' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
+});
+
+// Endpoint: Submit exam with server-side authoritative grading
+app.post('/api/exam/submit', (req: Request, res: Response) => {
+  try {
+    const {
+      sessionId,
+      userAnswers = {},
+      timeSpentSeconds = 0,
+      studentId,
+      studentName,
+      studentCode,
+      classRoom,
+      teacherId,
+      teacherName,
+      violationsCount = 0,
+      antiCheatLogs = [],
+    } = req.body;
+
+    const session = activeExamSessions.get(sessionId);
+    const questionIds = session ? session.questionIds : Object.keys(userAnswers);
+    const questions = questionIds.map(id => THEORY_QUESTIONS.find(q => q.id === id)).filter(Boolean) as typeof THEORY_QUESTIONS;
+
+    let totalScore = 0;
+    let correctCount = 0;
+    const domainScores: Record<string, { total: number; correct: number }> = {};
+    const wrongQuestions: any[] = [];
+    const reviewQuestions: any[] = [];
+
+    questions.forEach(q => {
+      const userAns = userAnswers[q.id];
+      const isCorrect = userAns === q.correctAnswer;
+      if (isCorrect) {
+        correctCount += 1;
+      }
+
+      const dom = q.domainName || 'Tổng quát';
+      if (!domainScores[dom]) {
+        domainScores[dom] = { total: 0, correct: 0 };
+      }
+      domainScores[dom].total += 1;
+      if (isCorrect) domainScores[dom].correct += 1;
+
+      const userOpt = q.options.find(o => o.id === userAns);
+      const correctOpt = q.options.find(o => o.id === q.correctAnswer);
+
+      if (!isCorrect) {
+        wrongQuestions.push({
+          title: q.title,
+          domainName: q.domainName,
+          userAnswerText: userOpt ? `[${userAns.toUpperCase()}] ${userOpt.text}` : 'Chưa chọn đáp án',
+          correctAnswerText: correctOpt ? `[${q.correctAnswer.toUpperCase()}] ${correctOpt.text}` : 'N/A',
+          officialRibbonPath: q.officialRibbonPath,
+          explanation: q.explanation,
+        });
+      }
+
+      // Review item sent back only upon completion
+      reviewQuestions.push({
+        id: q.id,
+        subject: q.subject,
+        domainName: q.domainName,
+        title: q.title,
+        scenario: q.scenario,
+        options: q.options,
+        userAnswer: userAns,
+        correctAnswer: q.correctAnswer,
+        isCorrect,
+        explanation: q.explanation,
+        officialRibbonPath: q.officialRibbonPath,
+        shortcutTip: q.shortcutTip,
+      });
+    });
+
+    const totalQ = questions.length || 1;
+    // Standard Certiport MOS scale: 1000 max score, 700 passing score
+    totalScore = Math.round((correctCount / totalQ) * 1000);
+    const passed = totalScore >= 700;
+
+    const finalViolations = Math.max(violationsCount, session?.violationsCount || 0);
+    const finalLogs = antiCheatLogs.length > 0 ? antiCheatLogs : (session?.antiCheatLogs || []);
+
+    const submission: SubmissionRecord = {
+      id: 'sub-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      studentId: studentId || session?.studentId || 'stu-' + Date.now(),
+      studentName: studentName || session?.studentName || 'Học Viên',
+      studentCode: studentCode || session?.studentCode || 'HV-' + Math.floor(1000 + Math.random() * 9000),
+      classRoom: classRoom || 'Lớp MOS-TinHoc01',
+      subject: (session?.subject || 'mixed') as any,
+      type: 'mock-exam',
+      score: totalScore,
+      passed,
+      timeSpentSeconds,
+      totalQuestions: totalQ,
+      correctCount,
+      teacherId: teacherId || 't-word-01',
+      teacherName: teacherName || 'ThS. Nguyễn Tuấn Anh',
+      submittedAt: new Date().toISOString(),
+      domainScores,
+      wrongQuestions,
+      status: 'pending',
+      violationsCount: finalViolations,
+      antiCheatLogs: finalLogs,
+    };
+
+    submissionsStore.unshift(submission);
+    if (submissionsStore.length > 200) {
+      submissionsStore = submissionsStore.slice(0, 200);
+    }
+
+    if (sessionId) {
+      activeExamSessions.delete(sessionId);
+    }
+
+    console.log(`[Exam Graded] Student: ${submission.studentName} - Score: ${submission.score}/1000 (${passed ? 'PASSED' : 'FAILED'}) - AntiCheat Violations: ${finalViolations}`);
+
+    return res.json({
+      success: true,
+      submission,
+      reviewQuestions,
+    });
+  } catch (err: any) {
+    console.error('Error submitting exam:', err);
+    return res.status(500).json({ error: err?.message || 'Lỗi khi chấm điểm bài thi.' });
+  }
+});
+
 // Endpoint: Submit exam/practice result from student
 app.post('/api/submissions', (req: Request, res: Response) => {
   try {
@@ -435,6 +667,65 @@ app.post('/api/submissions/:id/feedback', (req: Request, res: Response) => {
     return res.json({ success: true, submission: item });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || 'Lỗi lưu nhận xét giáo viên.' });
+  }
+});
+
+// Endpoint: Protected Question Bank Proxy (Strips answers for students, reveals for teachers)
+app.get('/api/questions', (req: Request, res: Response) => {
+  try {
+    const { subject, domainId, role = 'student' } = req.query;
+
+    let pool = THEORY_QUESTIONS;
+    if (subject && subject !== 'all') {
+      pool = pool.filter(q => q.subject === subject);
+    }
+    if (domainId) {
+      pool = pool.filter(q => q.domainId === domainId);
+    }
+
+    // Role-based data projection:
+    // Teachers/Admins get full questions including answers & explanations
+    if (role === 'teacher' || role === 'admin') {
+      return res.json({
+        total: pool.length,
+        questions: pool,
+      });
+    }
+
+    // Students get sanitized questions only - zero sensitive keys sent over the wire!
+    const sanitized = pool.map(q => ({
+      id: q.id,
+      subject: q.subject,
+      domainId: q.domainId,
+      domainName: q.domainName,
+      difficulty: q.difficulty,
+      type: q.type,
+      title: q.title,
+      scenario: q.scenario,
+      options: q.options,
+      points: q.points,
+    }));
+
+    return res.json({
+      total: sanitized.length,
+      questions: sanitized,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || 'Lỗi truy vấn ngân hàng câu hỏi.' });
+  }
+});
+
+// Endpoint: Granular Attempt & Results Details
+app.get('/api/attempts/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const submission = submissionsStore.find(s => s.id === id);
+    if (!submission) {
+      return res.status(404).json({ error: 'Không tìm thấy lượt thi với ID này.' });
+    }
+    return res.json({ attempt: submission });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || 'Lỗi truy xuất chi tiết lượt thi.' });
   }
 });
 

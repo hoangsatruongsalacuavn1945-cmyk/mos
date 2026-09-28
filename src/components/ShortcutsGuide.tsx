@@ -1,16 +1,128 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SHORTCUTS_DATA, RIBBON_PATHS_MAP } from '../data/shortcutsData';
 import { MOSSubject } from '../types/mos';
-import { Search, Keyboard, Compass, Copy, Check, Sparkles } from 'lucide-react';
+import { Search, Keyboard, Compass, Copy, Check, Sparkles, Zap, Trophy, RotateCcw, Flame } from 'lucide-react';
+import { soundManager } from '../utils/audio';
 
 interface ShortcutsGuideProps {
   selectedSubject: MOSSubject;
 }
 
+interface ShortcutDrillItem {
+  id: string;
+  action: string;
+  keysDisplay: string;
+  category: string;
+  targetApp: string;
+  hint: string;
+  validator: (e: KeyboardEvent) => boolean;
+}
+
+const DRILL_QUESTIONS: ShortcutDrillItem[] = [
+  {
+    id: 'd1',
+    action: 'Mở hộp thoại Format Cells (Định dạng ô nhanh) trong Excel',
+    keysDisplay: 'Ctrl + 1',
+    category: 'Định dạng',
+    targetApp: 'Excel',
+    hint: 'Nhấn giữ phím Ctrl rồi nhấn phím số 1',
+    validator: (e) => (e.ctrlKey || e.metaKey) && e.key === '1',
+  },
+  {
+    id: 'd2',
+    action: 'Chèn siêu liên kết (Insert Hyperlink)',
+    keysDisplay: 'Ctrl + K',
+    category: 'Chèn đối tượng',
+    targetApp: 'Word / Excel / PPT',
+    hint: 'Nhấn giữ phím Ctrl rồi nhấn phím K',
+    validator: (e) => (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k'),
+  },
+  {
+    id: 'd3',
+    action: 'Tạo bảng dữ liệu Excel Table từ vùng dữ liệu hiện tại',
+    keysDisplay: 'Ctrl + T',
+    category: 'Bảng tính',
+    targetApp: 'Excel',
+    hint: 'Nhấn phím Ctrl + T (hoặc Ctrl + L)',
+    validator: (e) => (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 't' || e.key.toLowerCase() === 'l'),
+  },
+  {
+    id: 'd4',
+    action: 'Lặp lại thao tác trước đó (Redo / Repeat Action)',
+    keysDisplay: 'Ctrl + Y hoặc F4',
+    category: 'Thao tác chung',
+    targetApp: 'Word / Excel',
+    hint: 'Nhấn tổ hợp Ctrl + Y hoặc phím F4',
+    validator: (e) => ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') || e.key === 'F4',
+  },
+  {
+    id: 'd5',
+    action: 'Mở cửa sổ Tìm kiếm & Thay thế (Find and Replace)',
+    keysDisplay: 'Ctrl + H',
+    category: 'Chỉnh sửa',
+    targetApp: 'Word / Excel',
+    hint: 'Nhấn Ctrl + H để mở Replace',
+    validator: (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h',
+  },
+  {
+    id: 'd6',
+    action: 'Trình chiếu slide PowerPoint từ đầu (Slide Show)',
+    keysDisplay: 'F5',
+    category: 'Trình chiếu',
+    targetApp: 'PowerPoint',
+    hint: 'Nhấn phím chức năng F5',
+    validator: (e) => e.key === 'F5',
+  },
+];
+
 export const ShortcutsGuide: React.FC<ShortcutsGuideProps> = ({ selectedSubject }) => {
-  const [activeTab, setActiveTab] = useState<'shortcuts' | 'ribbon'>('shortcuts');
+  const [activeTab, setActiveTab] = useState<'shortcuts' | 'ribbon' | 'drills'>('shortcuts');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // Drill State
+  const [drillIndex, setDrillIndex] = useState(0);
+  const [drillScore, setDrillScore] = useState(0);
+  const [drillStreak, setDrillStreak] = useState(0);
+  const [lastFeedback, setLastFeedback] = useState<'correct' | 'incorrect' | null>(null);
+  const [lastKeyPressed, setLastKeyPressed] = useState<string>('');
+
+  const currentDrill = DRILL_QUESTIONS[drillIndex];
+
+  // Intercept keyboard events in Drills mode
+  useEffect(() => {
+    if (activeTab !== 'drills') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent default browser shortcuts for drills like Ctrl+S, Ctrl+H, Ctrl+K, F5
+      if ((e.ctrlKey && ['s', 'k', 'h', 'y', 't', '1'].includes(e.key.toLowerCase())) || e.key === 'F5' || e.key === 'F4') {
+        e.preventDefault();
+      }
+
+      const keyName = `${e.ctrlKey ? 'Ctrl + ' : ''}${e.shiftKey ? 'Shift + ' : ''}${e.altKey ? 'Alt + ' : ''}${e.key.toUpperCase()}`;
+      setLastKeyPressed(keyName);
+
+      if (currentDrill.validator(e)) {
+        soundManager.playCorrect();
+        setLastFeedback('correct');
+        setDrillScore(s => s + 100 + drillStreak * 20);
+        setDrillStreak(st => st + 1);
+
+        setTimeout(() => {
+          setLastFeedback(null);
+          setDrillIndex(i => (i + 1) % DRILL_QUESTIONS.length);
+        }, 800);
+      } else if (!['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+        soundManager.playWrong();
+        setLastFeedback('incorrect');
+        setDrillStreak(0);
+        setTimeout(() => setLastFeedback(null), 1000);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, drillIndex, drillStreak, currentDrill]);
 
   // Filter shortcuts
   const filteredShortcuts = SHORTCUTS_DATA.filter(item => {
@@ -100,6 +212,20 @@ export const ShortcutsGuide: React.FC<ShortcutsGuideProps> = ({ selectedSubject 
           >
             <Compass className="w-3.5 h-3.5" />
             <span>Đường Dẫn Ribbon ({filteredRibbonPaths.length})</span>
+          </button>
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              setActiveTab('drills');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+              activeTab === 'drills'
+                ? 'bg-amber-500 text-white font-bold shadow-xs'
+                : 'text-amber-700 hover:bg-amber-50'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Thử Thách Bàn Phím (Drills)</span>
           </button>
         </div>
 
@@ -228,6 +354,103 @@ export const ShortcutsGuide: React.FC<ShortcutsGuideProps> = ({ selectedSubject 
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Keyboard Drills Mode */}
+      {activeTab === 'drills' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs max-w-3xl mx-auto text-center space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+              <span>Thử Thách Phím Tắt MOS</span>
+              <span>·</span>
+              <span>Câu {drillIndex + 1}/{DRILL_QUESTIONS.length}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                <Flame className="w-4 h-4 text-amber-500" />
+                <span>Combo: {drillStreak}x</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+                <Trophy className="w-4 h-4 text-blue-500" />
+                <span>Điểm: {drillScore}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="py-6 space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-700">
+              {currentDrill.targetApp} · {currentDrill.category}
+            </span>
+            <h3 className="text-xl sm:text-2xl font-black text-slate-900 max-w-xl mx-auto leading-snug">
+              {currentDrill.action}
+            </h3>
+            <p className="text-xs text-slate-500 italic">
+              💡 Gợi ý: {currentDrill.hint}
+            </p>
+          </div>
+
+          {/* Interactive Keyboard Capture Box */}
+          <div className={`p-8 rounded-2xl border-2 transition-all flex flex-col items-center justify-center min-h-[160px] ${
+            lastFeedback === 'correct' 
+              ? 'bg-emerald-50 border-emerald-500 scale-102' 
+              : lastFeedback === 'incorrect'
+              ? 'bg-rose-50 border-rose-500'
+              : 'bg-slate-50 border-dashed border-slate-300'
+          }`}>
+            {lastFeedback === 'correct' ? (
+              <div className="text-emerald-700 font-bold flex flex-col items-center gap-2 animate-bounce">
+                <Check className="w-10 h-10 text-emerald-600" />
+                <span className="text-lg">CHÍNH XÁC! (+{100 + drillStreak * 20} ĐIỂM)</span>
+              </div>
+            ) : lastFeedback === 'incorrect' ? (
+              <div className="text-rose-700 font-bold flex flex-col items-center gap-1">
+                <span className="text-sm">Chưa đúng! Bạn vừa nhấn: <strong>{lastKeyPressed || 'Phím khác'}</strong></span>
+                <span className="text-xs text-rose-500">Đáp án chuẩn: {currentDrill.keysDisplay}</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <Keyboard className="w-10 h-10 text-slate-400 animate-pulse" />
+                <div className="text-sm font-bold text-slate-700">
+                  NHẤN PHÍM TẮT TRÊN BÀN PHÍM CỦA BẠN NGAY BÂY GIỜ
+                </div>
+                <div className="text-xs text-slate-400">
+                  (Chuột bị vô hiệu hóa trong chế độ này để rèn phản xạ tự nhiên)
+                </div>
+                {lastKeyPressed && (
+                  <div className="text-xs font-mono text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
+                    Phím vừa nhận: {lastKeyPressed}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setDrillIndex(i => (i + 1) % DRILL_QUESTIONS.length);
+                setLastFeedback(null);
+              }}
+              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
+            >
+              Bỏ Qua Câu Này
+            </button>
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setDrillScore(0);
+                setDrillStreak(0);
+                setDrillIndex(0);
+                setLastFeedback(null);
+              }}
+              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Chơi Lại Từ Đầu</span>
+            </button>
           </div>
         </div>
       )}

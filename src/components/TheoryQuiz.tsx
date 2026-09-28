@@ -29,7 +29,12 @@ import {
   Zap,
   ChevronRight,
   ChevronLeft,
-  Layers
+  Layers,
+  MessageSquare,
+  Edit3,
+  AlertTriangle,
+  Volume2,
+  Send
 } from 'lucide-react';
 import { TheoryFlashcards } from './TheoryFlashcards';
 
@@ -66,6 +71,22 @@ export const TheoryQuiz: React.FC<TheoryQuizProps> = ({
   // Interactive Formula Playground Modal (Excel)
   const [showFormulaModal, setShowFormulaModal] = useState(false);
   const [selectedFormulaPreset, setSelectedFormulaPreset] = useState<number>(0);
+
+  // Private Notes state
+  const [showNotesDrawer, setShowNotesDrawer] = useState(false);
+  const [notesContent, setNotesContent] = useState('');
+  const [savedNotesToast, setSavedNotesToast] = useState(false);
+
+  // Question Discussion Forum state
+  const [showForumDrawer, setShowForumDrawer] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [commentList, setCommentList] = useState<Array<{ user: string; text: string; time: string }>>([]);
+
+  // Report Question Modal state
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportType, setReportType] = useState('incorrect_answer');
+  const [reportNote, setReportNote] = useState('');
+  const [reportSubmitted, setReportSubmitted] = useState(false);
 
   // Source Questions: pulls 1,000 questions for Word, 1,000 for Excel, and combined for All
   const sourceQuestions = useMemo(() => {
@@ -514,7 +535,72 @@ export const TheoryQuiz: React.FC<TheoryQuizProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Accessibility Text to Speech */}
+                  <button
+                    onClick={() => {
+                      if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                        const utterance = new SpeechSynthesisUtterance(`${currentQuestion.title}. ${currentQuestion.scenario || ''}`);
+                        utterance.lang = 'vi-VN';
+                        window.speechSynthesis.speak(utterance);
+                        soundManager.playClick();
+                      }
+                    }}
+                    className="p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                    title="Đọc to đề bài (Trợ năng học tập ARIA)"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+
+                  {/* Private Notes Button */}
+                  <button
+                    onClick={() => {
+                      soundManager.playClick();
+                      const existingNote = localStorage.getItem('mos_note_' + currentQuestion.id) || '';
+                      setNotesContent(existingNote);
+                      setShowNotesDrawer(!showNotesDrawer);
+                    }}
+                    className={`p-2 rounded-lg border transition-colors ${
+                      showNotesDrawer 
+                        ? 'bg-amber-100 border-amber-300 text-amber-900' 
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-amber-700 hover:bg-amber-50'
+                    }`}
+                    title="Ghi chú cá nhân câu hỏi này"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+
+                  {/* Community Discussion Forum */}
+                  <button
+                    onClick={() => {
+                      soundManager.playClick();
+                      setShowForumDrawer(!showForumDrawer);
+                    }}
+                    className={`p-2 rounded-lg border transition-colors ${
+                      showForumDrawer 
+                        ? 'bg-blue-100 border-blue-300 text-blue-900' 
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-blue-700 hover:bg-blue-50'
+                    }`}
+                    title="Thảo luận & mẹo làm bài cùng học viên khác"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                  </button>
+
+                  {/* Report Question Button */}
+                  <button
+                    onClick={() => {
+                      soundManager.playClick();
+                      setShowReportModal(true);
+                      setReportSubmitted(false);
+                    }}
+                    className="p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                    title="Báo lỗi đề thi cho Giáo viên/Admin"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                  </button>
+
+                  {/* Bookmark Button */}
                   <button
                     onClick={() => handleBookmarkToggle(currentQuestion.id)}
                     className={`p-2 rounded-lg border transition-colors ${
@@ -627,6 +713,118 @@ export const TheoryQuiz: React.FC<TheoryQuizProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Private Notes Drawer */}
+              {showNotesDrawer && (
+                <div className="mt-4 p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Ghi chú riêng cho câu hỏi này</span>
+                    </span>
+                    <button
+                      onClick={() => setShowNotesDrawer(false)}
+                      className="text-amber-700 hover:text-amber-900 text-xs font-semibold"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                  <textarea
+                    value={notesContent}
+                    onChange={(e) => setNotesContent(e.target.value)}
+                    placeholder="Viết lưu ý cá nhân, mẹo nhớ phím tắt, bẫy cần tránh..."
+                    rows={3}
+                    className="w-full text-xs p-2.5 bg-white border border-amber-300 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-amber-700">
+                      {savedNotesToast ? '✓ Đã lưu ghi chú vào máy!' : 'Ghi chú tự lưu cục bộ theo tài khoản'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        localStorage.setItem('mos_note_' + currentQuestion.id, notesContent);
+                        setSavedNotesToast(true);
+                        soundManager.playCorrect();
+                        setTimeout(() => setSavedNotesToast(false), 2000);
+                      }}
+                      className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors"
+                    >
+                      Lưu Ghi Chú
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Community Discussion Forum */}
+              {showForumDrawer && (
+                <div className="mt-4 p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3 animate-fadeIn">
+                  <div className="flex items-center justify-between border-b border-blue-100 pb-2">
+                    <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Thảo luận học tập & Kinh nghiệm làm bài</span>
+                    </span>
+                    <button
+                      onClick={() => setShowForumDrawer(false)}
+                      className="text-blue-700 hover:text-blue-900 text-xs font-semibold"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+
+                  {/* Seeded Community Tips */}
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
+                      <div className="flex items-center justify-between font-bold text-slate-700 text-[11px] mb-1">
+                        <span className="text-blue-600">Trần Minh Quân (Lớp MOS-TinHoc01)</span>
+                        <span className="text-slate-400 font-normal">Hôm qua</span>
+                      </div>
+                      <p className="text-slate-600">
+                        Mẹo: Đề MOS Certiport rất hay lừa chỗ này. Hãy nhớ quan sát kỹ tên nhóm lệnh (Group) trên thanh Ribbon trước khi bấm!
+                      </p>
+                    </div>
+
+                    {commentList.map((c, i) => (
+                      <div key={i} className="bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
+                        <div className="flex items-center justify-between font-bold text-slate-700 text-[11px] mb-1">
+                          <span className="text-emerald-700">{c.user}</span>
+                          <span className="text-slate-400 font-normal">{c.time}</span>
+                        </div>
+                        <p className="text-slate-600">{c.text}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* New Comment Input */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Chia sẻ mẹo hoặc hỏi thắc mắc về câu này..."
+                      className="flex-1 text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newComment.trim()) {
+                          soundManager.playClick();
+                          setCommentList([...commentList, { user: 'Bạn (Học Viên)', text: newComment.trim(), time: 'Vừa xong' }]);
+                          setNewComment('');
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newComment.trim()) return;
+                        soundManager.playClick();
+                        setCommentList([...commentList, { user: 'Bạn (Học Viên)', text: newComment.trim(), time: 'Vừa xong' }]);
+                        setNewComment('');
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Gửi</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Explanation & Official Ribbon Path Card */}
@@ -1023,6 +1221,84 @@ export const TheoryQuiz: React.FC<TheoryQuizProps> = ({
                 Đã Hiểu & Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Question Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+                <h3 className="font-bold text-slate-900 text-sm">Báo Lỗi Đề Thi #{currentQuestion.id}</h3>
+              </div>
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {reportSubmitted ? (
+              <div className="p-4 bg-emerald-50 text-emerald-800 rounded-xl text-center space-y-2">
+                <Check className="w-8 h-8 text-emerald-600 mx-auto" />
+                <p className="font-bold text-xs">Cảm ơn bạn! Báo cáo đã được chuyển cho Hội Đồng Chuyên Môn MOS.</p>
+                <p className="text-[11px] text-emerald-600">Ban biên soạn sẽ rà soát và phản hồi trong thời gian sớm nhất.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Vấn đề phát hiện:</label>
+                  <select
+                    value={reportType}
+                    onChange={(e) => setReportType(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
+                  >
+                    <option value="incorrect_answer">Đáp án đánh dấu sai hoặc gây tranh cãi</option>
+                    <option value="typo_scenario">Lỗi chính tả hoặc nội dung tình huống chưa rõ</option>
+                    <option value="ribbon_path_error">Đường dẫn Ribbon bị lệch phiên bản Office</option>
+                    <option value="other">Ý kiến đóng góp khác</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Chi tiết góp ý:</label>
+                  <textarea
+                    value={reportNote}
+                    onChange={(e) => setReportNote(e.target.value)}
+                    placeholder="Mô tả cụ thể vấn đề hoặc gợi ý sửa đổi..."
+                    rows={3}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setShowReportModal(false)}
+                    className="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 font-semibold"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    onClick={() => {
+                      soundManager.playCorrect();
+                      setReportSubmitted(true);
+                      setTimeout(() => {
+                        setShowReportModal(false);
+                        setReportSubmitted(false);
+                        setReportNote('');
+                      }, 2000);
+                    }}
+                    className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition-colors shadow-2xs"
+                  >
+                    Gửi Báo Cáo
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

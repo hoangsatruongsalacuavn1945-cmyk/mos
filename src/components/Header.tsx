@@ -16,10 +16,12 @@ import {
   Trophy, 
   User, 
   ShieldCheck, 
-  GraduationCap 
+  GraduationCap,
+  FileSpreadsheet,
+  Laptop
 } from 'lucide-react';
 
-export type NavTab = 'theory' | 'practical' | 'mock-exam' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice' | 'teacher-portal';
+export type NavTab = 'theory' | 'practical' | 'file-grader' | 'mock-exam' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice' | 'teacher-portal';
 
 interface HeaderProps {
   currentTab: NavTab;
@@ -31,6 +33,7 @@ interface HeaderProps {
   onOpenAuthModal: () => void;
   onOpenLeaderboard: () => void;
   onOpenCertificate: () => void;
+  onOpenSystemCheck?: () => void;
   isAudioMuted: boolean;
   onToggleAudio: () => void;
 }
@@ -45,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   onOpenLeaderboard,
   onOpenCertificate,
+  onOpenSystemCheck,
   isAudioMuted,
   onToggleAudio,
 }) => {
@@ -94,6 +98,19 @@ export const Header: React.FC<HeaderProps> = ({
             <Monitor className="w-4 h-4" />
             <span>Thực Hành</span>
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">1,000+</span>
+          </button>
+
+          <button
+            onClick={() => onSelectTab('file-grader')}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+              currentTab === 'file-grader'
+                ? 'bg-emerald-50 text-emerald-800 font-bold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Chấm File .XLSX</span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-600 text-white">XML</span>
           </button>
 
           <button
@@ -196,6 +213,17 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {isAudioMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
+
+          {/* System Check button */}
+          {onOpenSystemCheck && (
+            <button
+              onClick={onOpenSystemCheck}
+              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+              title="Kiểm tra độ tương thích phòng thi (System Check)"
+            >
+              <Laptop className="w-4 h-4 text-blue-600" />
+            </button>
+          )}
 
           {/* Leaderboard button */}
           <button
@@ -307,6 +335,18 @@ export const Header: React.FC<HeaderProps> = ({
           className={`px-2.5 py-1.5 font-medium rounded-md whitespace-nowrap ${currentTab === 'practical' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
         >
           Thực Hành
+        </button>
+        <button
+          onClick={() => onSelectTab('file-grader')}
+          className={`px-2.5 py-1.5 font-bold rounded-md whitespace-nowrap ${currentTab === 'file-grader' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700'}`}
+        >
+          Chấm File
+        </button>
+        <button
+          onClick={() => onSelectTab('shortcuts')}
+          className={`px-2.5 py-1.5 font-medium rounded-md whitespace-nowrap ${currentTab === 'shortcuts' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}
+        >
+          Phím Tắt
         </button>
         <button
           onClick={() => onSelectTab('roadmap')}

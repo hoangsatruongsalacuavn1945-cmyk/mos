@@ -55,5 +55,7 @@ export interface Submission {
   submittedAt: string;
   domainScores?: Record<string, { total: number; correct: number }>;
   wrongQuestions?: ExamWrongQuestionSummary[];
+  violationsCount?: number;
+  antiCheatLogs?: string[];
   status: 'pending' | 'reviewed';
 }

@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import { Header, NavTab } from './components/Header';
 import { TheoryQuiz } from './components/TheoryQuiz';
 import { PracticalSimulator } from './components/PracticalSimulator';
-import { MockExamModal } from './components/MockExamModal';
 import { ShortcutsGuide } from './components/ShortcutsGuide';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { AITutorChat } from './components/AITutorChat';
@@ -18,6 +17,9 @@ import { TeacherPortal } from './components/TeacherPortal';
 import { AuthModal } from './components/AuthModal';
 import { MOSCertificateModal } from './components/MOSCertificateModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
+import { ExamRoomView } from './components/ExamRoomView';
+import { RealFileGrader } from './components/RealFileGrader';
+import { SystemCheckModal } from './components/SystemCheckModal';
 import { MOSSubject, UserStats } from './types/mos';
 import { UserProfile } from './types/user';
 import { loadUserStats } from './utils/storage';
@@ -48,16 +50,47 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile>(getCurrentUser());
   
   // Modals state
-  const [isExamModalOpen, setIsExamModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isLeaderboardModalOpen, setIsLeaderboardModalOpen] = useState(false);
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
+  const [isSystemCheckOpen, setIsSystemCheckOpen] = useState(false);
   const [certificateInfo, setCertificateInfo] = useState<{ subject: string; score: number }>({
     subject: 'excel',
     score: 850,
   });
   const [isAudioMuted, setIsAudioMuted] = useState(soundManager.getMuted());
+
+  // URL Hash-based router listener for history, back-button and bookmarking
+  useEffect(() => {
+    const syncFromHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      const validTabs: NavTab[] = [
+        'theory', 'practical', 'file-grader', 'mock-exam', 'roadmap',
+        'shortcuts', 'analytics', 'ai-tutor', 'ai-practice',
+        'teacher-portal'
+      ];
+      if (validTabs.includes(hash as NavTab)) {
+        setCurrentTab(hash as NavTab);
+      } else if (hash === 'leaderboard') {
+        setIsLeaderboardModalOpen(true);
+      } else if (hash === 'certificate') {
+        setIsCertificateModalOpen(true);
+      } else if (hash === 'system-check') {
+        setIsSystemCheckOpen(true);
+      }
+    };
+
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, []);
+
+  const navigateToTab = (tab: NavTab) => {
+    soundManager.playClick();
+    setCurrentTab(tab);
+    window.location.hash = tab;
+  };
 
   // Sync stats when storage updates
   const refreshStats = () => {
@@ -69,7 +102,7 @@ export default function App() {
   }, []);
 
   const handleNavigateToQuizWithFilter = (_filter: 'bookmarked' | 'wrong') => {
-    setCurrentTab('theory');
+    navigateToTab('theory');
   };
 
   const handleOpenCertificate = (sub?: string, score?: number) => {
@@ -78,24 +111,33 @@ export default function App() {
       subject: sub || (passedExam?.subject === 'mixed' ? 'excel' : passedExam?.subject) || (selectedSubject === 'all' ? 'excel' : selectedSubject),
       score: score || passedExam?.score || 850,
     });
+    window.location.hash = 'certificate';
     setIsCertificateModalOpen(true);
   };
 
   const isTeacher = currentUser.role === 'teacher';
+
+  // DEDICATED FULL-PAGE EXAM ROOM VIEW (Eliminates Modal Hell & Memory Traps)
+  if (currentTab === 'mock-exam') {
+    return (
+      <ExamRoomView
+        selectedSubject={selectedSubject}
+        currentUser={currentUser}
+        onExit={() => navigateToTab('theory')}
+        onOpenCertificate={(sub, score) => {
+          handleOpenCertificate(sub, score);
+        }}
+        onStatsUpdate={refreshStats}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top 3-Zone Navigation Header */}
       <Header
         currentTab={currentTab}
-        onSelectTab={tab => {
-          soundManager.playClick();
-          if (tab === 'mock-exam') {
-            setIsExamModalOpen(true);
-          } else {
-            setCurrentTab(tab);
-          }
-        }}
+        onSelectTab={tab => navigateToTab(tab)}
         selectedSubject={selectedSubject}
         onSelectSubject={sub => {
           soundManager.playClick();
@@ -112,9 +154,14 @@ export default function App() {
         }}
         onOpenLeaderboard={() => {
           soundManager.playClick();
+          window.location.hash = 'leaderboard';
           setIsLeaderboardModalOpen(true);
         }}
         onOpenCertificate={() => handleOpenCertificate()}
+        onOpenSystemCheck={() => {
+          soundManager.playClick();
+          setIsSystemCheckOpen(true);
+        }}
         isAudioMuted={isAudioMuted}
         onToggleAudio={() => {
           const next = soundManager.toggleMute();
@@ -124,56 +171,71 @@ export default function App() {
 
       {/* Hero Quick Banner */}
       <div className="bg-white border-b border-slate-200 py-3.5 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-xs ${
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-xs shrink-0 ${
               isTeacher ? 'bg-emerald-600' : 'bg-blue-600'
             }`}>
               {isTeacher ? <ShieldCheck className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
             </div>
             <div>
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                <span>Hệ Thống Luyện Thi Chứng Chỉ Quốc Tế MOS 365 / 2019</span>
+              <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                <span>Khảo Thí Chuẩn Quốc Tế MOS 365 / 2019</span>
                 <span aria-hidden="true">·</span>
-                <span className="text-blue-600">Chuẩn IIG & Certiport</span>
+                <span className="text-blue-600 font-semibold">IIG & Certiport</span>
+                <span aria-hidden="true">·</span>
+                <span>Thang điểm 1000 (Đạt {'>='} 700)</span>
                 {isTeacher && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span className="px-1.5 py-0.2 text-[10px] bg-emerald-100 text-emerald-800 font-bold rounded">
-                      Chế độ Giáo Viên
-                    </span>
+                    <span className="text-emerald-700 font-bold">Chế độ Giảng Viên</span>
                   </>
                 )}
               </div>
-              <h1 className="text-base sm:text-lg font-bold text-slate-900">
+              <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight mt-0.5">
                 {currentTab === 'teacher-portal'
                   ? `Cổng Quản Lý Bài Nộp & Chấm Điểm Bộ Môn: MOS ${currentUser.targetSubject?.toUpperCase() || 'EXCEL'}`
+                  : currentTab === 'file-grader'
+                  ? 'Hệ Thống Chấm Điểm File Thực (.XLSX / .DOCX) Tự Động'
                   : selectedSubject === 'word'
-                  ? 'MOS Word Associate (MO-100) - Ôn Luyện Toàn Diện'
+                  ? 'MOS Word Associate (MO-100) - Soạn Thảo & Định Dạng Tài Liệu'
                   : selectedSubject === 'excel'
-                  ? 'MOS Excel Associate (MO-200) - Làm Chủ Bảng Tính & Hàm'
+                  ? 'MOS Excel Associate (MO-200) - Phân Tích Dữ Liệu & Làm Chủ Hàm'
                   : selectedSubject === 'powerpoint'
-                  ? 'MOS PowerPoint Associate (MO-300) - Thiết Kế & Hiệu Ứng'
-                  : 'MOS Master - Nền Tảng Ôn Tập Word, Excel, PowerPoint'}
+                  ? 'MOS PowerPoint Associate (MO-300) - Thiết Kế & Hiệu Ứng Trình Chiếu'
+                  : 'MOS Master - Luyện Thi Chứng Chỉ Tin Học Quốc Tế Toàn Diện'}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+            {/* System Check Quick Button */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setIsSystemCheckOpen(true);
+              }}
+              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
+              title="Kiểm tra độ tương thích phòng thi (màn hình, mạng, fullscreen)"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>Kiểm Tra Máy Thi</span>
+            </button>
+
             {/* Quick Switch to Teacher Portal */}
             <button
               onClick={() => {
                 soundManager.playClick();
                 setCurrentTab(currentTab === 'teacher-portal' ? 'theory' : 'teacher-portal');
               }}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 border shadow-2xs ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border shadow-2xs ${
                 currentTab === 'teacher-portal'
                   ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
                   : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
               }`}
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>{currentTab === 'teacher-portal' ? 'Quay Lại Góc Học Viên' : 'Vào Cổng Giáo Viên'}</span>
+              <span>{currentTab === 'teacher-portal' ? 'Quay Lại Học Viên' : 'Vào Cổng Giáo Viên'}</span>
             </button>
 
             <button
@@ -181,7 +243,7 @@ export default function App() {
                 soundManager.playClick();
                 setIsReportModalOpen(true);
               }}
-              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
+              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
               title="Gửi báo cáo tiến độ học tập và điểm thi cho giáo viên phụ trách"
             >
               <Mail className="w-3.5 h-3.5 text-slate-500" />
@@ -190,10 +252,9 @@ export default function App() {
 
             <button
               onClick={() => {
-                soundManager.playClick();
-                setIsExamModalOpen(true);
+                navigateToTab('mock-exam');
               }}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs flex items-center gap-1.5"
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Vào Thi Thử 50 Phút</span>
@@ -207,7 +268,7 @@ export default function App() {
         {currentTab === 'teacher-portal' && (
           <TeacherPortal
             currentUser={currentUser}
-            onSwitchToStudentView={() => setCurrentTab('theory')}
+            onSwitchToStudentView={() => navigateToTab('theory')}
           />
         )}
 
@@ -228,16 +289,17 @@ export default function App() {
           />
         )}
 
+        {currentTab === 'file-grader' && (
+          <RealFileGrader
+            currentUser={currentUser}
+            onStatsUpdate={refreshStats}
+          />
+        )}
+
         {currentTab === 'roadmap' && (
           <PersonalizedRoadmap
             stats={stats}
-            onNavigateTab={tab => {
-              if (tab === 'mock-exam') {
-                setIsExamModalOpen(true);
-              } else {
-                setCurrentTab(tab);
-              }
-            }}
+            onNavigateTab={tab => navigateToTab(tab)}
             onSelectSubject={sub => setSelectedSubject(sub)}
           />
         )}
@@ -259,25 +321,12 @@ export default function App() {
             stats={stats}
             onStatsUpdate={refreshStats}
             onNavigateToQuiz={handleNavigateToQuizWithFilter}
-            onNavigateToRoadmap={() => setCurrentTab('roadmap')}
+            onNavigateToRoadmap={() => navigateToTab('roadmap')}
             onOpenReport={() => setIsReportModalOpen(true)}
             onOpenCertificate={() => handleOpenCertificate()}
           />
         )}
       </main>
-
-      {/* 50-Minute Certiport Mock Exam Modal */}
-      {isExamModalOpen && (
-        <MockExamModal
-          selectedSubject={selectedSubject}
-          onClose={() => setIsExamModalOpen(false)}
-          onStatsUpdate={refreshStats}
-          onOpenCertificate={(sub, score) => {
-            setIsExamModalOpen(false);
-            handleOpenCertificate(sub, score);
-          }}
-        />
-      )}
 
       {/* Supervisor Progress Report Modal */}
       {isReportModalOpen && (
@@ -295,7 +344,7 @@ export default function App() {
         onUserChanged={user => {
           setCurrentUser(user);
           if (user.role === 'teacher') {
-            setCurrentTab('teacher-portal');
+            navigateToTab('teacher-portal');
           }
         }}
       />
@@ -313,6 +362,12 @@ export default function App() {
       <LeaderboardModal
         isOpen={isLeaderboardModalOpen}
         onClose={() => setIsLeaderboardModalOpen(false)}
+      />
+
+      {/* System Check Modal */}
+      <SystemCheckModal
+        isOpen={isSystemCheckOpen}
+        onClose={() => setIsSystemCheckOpen(false)}
       />
 
       {/* Modern Clean Footer adhering to frontend design guidelines */}
