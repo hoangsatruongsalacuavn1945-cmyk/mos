@@ -1,4 +1,22 @@
-export type UserRole = 'student' | 'teacher';
+export type UserRole = 'guest' | 'student' | 'teacher' | 'admin';
+
+export interface IUser {
+  id?: string;
+  name: string;
+  fullName?: string;
+  email: string;
+  role: UserRole;
+  token?: string; // JWT Token cho Teacher/Admin
+  studentCode?: string;
+  classRoom?: string;
+  targetSubject?: 'word' | 'excel' | 'powerpoint' | 'all';
+  assignedTeacherId?: string;
+  assignedTeacherName?: string;
+  assignedTeacherEmail?: string;
+  createdAt?: string;
+}
+
+export type UserProfile = IUser;
 
 export interface TeacherProfile {
   id: string;
@@ -9,20 +27,8 @@ export interface TeacherProfile {
   department: string;
   phone?: string;
   avatarBg?: string;
-}
-
-export interface UserProfile {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  studentCode?: string;
-  classRoom?: string;
-  targetSubject: 'word' | 'excel' | 'powerpoint' | 'all';
-  assignedTeacherId: string;
-  assignedTeacherName: string;
-  assignedTeacherEmail: string;
-  createdAt: string;
+  createdAt?: string;
+  activeStudentsCount?: number;
 }
 
 export interface ExamWrongQuestionSummary {

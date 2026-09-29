@@ -163,11 +163,11 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
 
     // Auto-send result to teacher
     const user = getCurrentUser();
-    const teacher = getTeacherForSubject(selectedSubject === 'all' ? user.targetSubject : selectedSubject);
+    const teacher = getTeacherForSubject(selectedSubject === 'all' ? (user.targetSubject || 'excel') : selectedSubject);
     setAssignedTeacher(teacher);
 
     sendSubmissionToTeacher({
-      studentId: user.id,
+      studentId: user.id || 'usr-default',
       studentName: user.name,
       studentCode: user.studentCode || 'HV-2026',
       classRoom: user.classRoom || 'Lớp MOS',

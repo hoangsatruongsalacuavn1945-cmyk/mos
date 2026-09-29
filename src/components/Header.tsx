@@ -18,10 +18,11 @@ import {
   ShieldCheck, 
   GraduationCap,
   FileSpreadsheet,
-  Laptop
+  Laptop,
+  Crown
 } from 'lucide-react';
 
-export type NavTab = 'theory' | 'practical' | 'file-grader' | 'mock-exam' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice' | 'teacher-portal';
+export type NavTab = 'theory' | 'practical' | 'file-grader' | 'mock-exam' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice' | 'teacher-portal' | 'owner-portal';
 
 interface HeaderProps {
   currentTab: NavTab;
@@ -53,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAudio,
 }) => {
   const isTeacher = currentUser.role === 'teacher';
+  const isAdmin = currentUser.role === 'admin';
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
@@ -149,6 +151,21 @@ export const Header: React.FC<HeaderProps> = ({
             <ShieldCheck className="w-4 h-4" />
             <span>Cổng Giáo Viên</span>
           </button>
+
+          {/* Owner Portal Nav Tab (Admin Exclusive) */}
+          {isAdmin && (
+            <button
+              onClick={() => onSelectTab('owner-portal')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-black rounded-lg transition-all whitespace-nowrap ${
+                currentTab === 'owner-portal'
+                  ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/50'
+                  : 'text-amber-900 hover:bg-amber-100 bg-amber-50 border border-amber-300/80'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-amber-600" />
+              <span>Quản Trị Chủ Sở Hữu</span>
+            </button>
+          )}
 
           <button
             onClick={() => onSelectTab('ai-tutor')}
@@ -292,23 +309,30 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenAuthModal}
             className={`flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-xl border transition-all shadow-2xs group ${
-              isTeacher
+              isAdmin
+                ? 'bg-amber-50/90 hover:bg-amber-100 border-amber-300 text-amber-950 ring-1 ring-amber-400/40'
+                : isTeacher
                 ? 'bg-emerald-50/80 hover:bg-emerald-100 border-emerald-300 text-emerald-900'
                 : 'bg-slate-50 hover:bg-blue-50 border-slate-200 hover:border-blue-300 text-slate-800'
             }`}
-            title="Nhấp để đăng nhập hoặc đổi tài khoản Học viên / Giáo viên"
+            title="Nhấp để đăng nhập hoặc đổi tài khoản Học viên / Giáo viên / Chủ sở hữu"
           >
             <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-white shadow-xs shrink-0 ${
-              isTeacher ? 'bg-emerald-600' : 'bg-blue-600'
+              isAdmin ? 'bg-amber-500 text-slate-950 font-black' : isTeacher ? 'bg-emerald-600' : 'bg-blue-600'
             }`}>
-              {currentUser.name.charAt(0)}
+              {isAdmin ? <Crown className="w-4 h-4 text-slate-950" /> : currentUser.name.charAt(0)}
             </div>
             <div className="text-left hidden sm:block">
               <div className="text-xs font-bold leading-tight group-hover:text-blue-600 truncate max-w-[110px]">
                 {currentUser.name}
               </div>
               <div className="text-[10px] text-slate-500 font-medium leading-none flex items-center gap-1">
-                {isTeacher ? (
+                {isAdmin ? (
+                  <span className="text-amber-800 font-extrabold flex items-center gap-0.5">
+                    <Crown className="w-2.5 h-2.5 text-amber-600" />
+                    Chủ Sở Hữu
+                  </span>
+                ) : isTeacher ? (
                   <span className="text-emerald-700 font-bold flex items-center gap-0.5">
                     <ShieldCheck className="w-2.5 h-2.5" />
                     GV Bộ Môn
@@ -324,6 +348,15 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile navigation tab strip */}
       <div className="xl:hidden flex items-center justify-between border-t border-slate-100 px-3 py-2 bg-slate-50 overflow-x-auto text-xs gap-1">
+        {isAdmin && (
+          <button
+            onClick={() => onSelectTab('owner-portal')}
+            className={`px-2.5 py-1.5 font-black rounded-md whitespace-nowrap flex items-center gap-1 ${currentTab === 'owner-portal' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-amber-900 bg-amber-50 border border-amber-300'}`}
+          >
+            <Crown className="w-3 h-3 text-amber-600" />
+            Cổng Chủ Sở Hữu
+          </button>
+        )}
         <button
           onClick={() => onSelectTab('theory')}
           className={`px-2.5 py-1.5 font-medium rounded-md whitespace-nowrap ${currentTab === 'theory' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'}`}

@@ -1,4 +1,11 @@
-import { UserProfile, TeacherProfile, Submission } from '../types/user';
+import { useState, useEffect } from 'react';
+import { UserProfile, TeacherProfile, Submission, IUser } from '../types/user';
+
+export const DEFAULT_GUEST: IUser = {
+  name: 'Khách',
+  email: 'guest@student.edu.vn',
+  role: 'guest',
+};
 
 export const DEFAULT_TEACHERS: TeacherProfile[] = [
   {
@@ -45,6 +52,19 @@ export const DEFAULT_TEACHERS: TeacherProfile[] = [
 
 const USER_STORAGE_KEY = 'mos_current_user_profile_v2';
 const SUBMISSIONS_STORAGE_KEY = 'mos_local_submissions_cache_v2';
+const TEACHERS_STORAGE_KEY = 'mos_teachers_list_v2';
+
+export const OWNER_PROFILE: UserProfile = {
+  id: 'owner-master-root',
+  name: 'Chủ Sở Hữu Hệ Thống (Master Owner)',
+  email: 'hoangsatruongsalacuavn1945@gmail.com',
+  role: 'admin',
+  targetSubject: 'all',
+  assignedTeacherId: '',
+  assignedTeacherName: 'Toàn Quyền Quản Trị Hệ Thống',
+  assignedTeacherEmail: 'hoangsatruongsalacuavn1945@gmail.com',
+  createdAt: new Date().toISOString(),
+};
 
 export const DEFAULT_STUDENT: UserProfile = {
   id: 'stu-user-default',
@@ -59,6 +79,77 @@ export const DEFAULT_STUDENT: UserProfile = {
   assignedTeacherEmail: 'bichmai.mosexcel@edu.vn',
   createdAt: new Date().toISOString(),
 };
+
+export function getTeachers(): TeacherProfile[] {
+  try {
+    const raw = localStorage.getItem(TEACHERS_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(TEACHERS_STORAGE_KEY, JSON.stringify(DEFAULT_TEACHERS));
+      return DEFAULT_TEACHERS;
+    }
+    const list = JSON.parse(raw);
+    return Array.isArray(list) && list.length > 0 ? list : DEFAULT_TEACHERS;
+  } catch {
+    return DEFAULT_TEACHERS;
+  }
+}
+
+export function saveTeachers(teachers: TeacherProfile[]): void {
+  try {
+    localStorage.setItem(TEACHERS_STORAGE_KEY, JSON.stringify(teachers));
+  } catch (e) {
+    console.error('Error saving teachers list:', e);
+  }
+}
+
+export function addTeacher(teacherData: Omit<TeacherProfile, 'id'>): TeacherProfile {
+  const teachers = getTeachers();
+  const newTeacher: TeacherProfile = {
+    ...teacherData,
+    id: 't-custom-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    createdAt: new Date().toISOString(),
+    activeStudentsCount: 0,
+  };
+  teachers.unshift(newTeacher);
+  saveTeachers(teachers);
+
+  // Sync to backend if possible
+  fetch('/api/teachers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newTeacher),
+  }).catch(() => {});
+
+  return newTeacher;
+}
+
+export function deleteTeacher(teacherId: string): boolean {
+  const teachers = getTeachers();
+  const filtered = teachers.filter(t => t.id !== teacherId);
+  if (filtered.length === teachers.length) return false;
+  saveTeachers(filtered);
+
+  // Sync to backend
+  fetch(`/api/teachers/${teacherId}`, { method: 'DELETE' }).catch(() => {});
+  return true;
+}
+
+export function updateTeacher(teacherId: string, updates: Partial<TeacherProfile>): TeacherProfile | null {
+  const teachers = getTeachers();
+  const index = teachers.findIndex(t => t.id === teacherId);
+  if (index === -1) return null;
+  teachers[index] = { ...teachers[index], ...updates };
+  saveTeachers(teachers);
+
+  // Sync to backend
+  fetch(`/api/teachers/${teacherId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(teachers[index]),
+  }).catch(() => {});
+
+  return teachers[index];
+}
 
 export function getCurrentUser(): UserProfile {
   try {
@@ -81,11 +172,83 @@ export function saveCurrentUser(user: UserProfile): void {
   }
 }
 
+// Reactive Auth Store (Compatible with requested Zustand pattern)
+const authListeners = new Set<() => void>();
+
+export const authStore = {
+  getUser: (): IUser => getCurrentUser(),
+  getToken: (): string => {
+    try {
+      return localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('accessToken') || '';
+    } catch {
+      return '';
+    }
+  },
+  login: (userData: any, token?: string) => {
+    if (userData && !userData.name && userData.fullName) {
+      userData.name = userData.fullName;
+    }
+    if (token) {
+      userData.token = token;
+      try {
+        localStorage.setItem('mos_auth_token_jwt', token);
+        localStorage.setItem('accessToken', token);
+      } catch {}
+    }
+    saveCurrentUser(userData);
+    authListeners.forEach(fn => fn());
+  },
+  logout: () => {
+    const guestUser: IUser = { name: 'Khách', email: 'guest@student.edu.vn', role: 'guest' };
+    try {
+      localStorage.removeItem('mos_auth_token_jwt');
+      localStorage.removeItem('accessToken');
+    } catch {}
+    saveCurrentUser(guestUser);
+    authListeners.forEach(fn => fn());
+  },
+  subscribe: (fn: () => void) => {
+    authListeners.add(fn);
+    return () => {
+      authListeners.delete(fn);
+    };
+  }
+};
+
+export interface AuthState {
+  user: IUser;
+  token: string;
+  login: (userData: any, token?: string) => void;
+  logout: () => void;
+}
+
+export function useAuthStore<T = AuthState>(selector?: (state: AuthState) => T): T {
+  const [user, setUser] = useState<IUser>(authStore.getUser());
+  const [token, setToken] = useState<string>(authStore.getToken());
+
+  useEffect(() => {
+    return authStore.subscribe(() => {
+      setUser(authStore.getUser());
+      setToken(authStore.getToken());
+    });
+  }, []);
+
+  const state: AuthState = {
+    user,
+    token,
+    login: authStore.login,
+    logout: authStore.logout,
+  };
+
+  return selector ? selector(state) : (state as unknown as T);
+}
+
 // Find appropriate teacher for a specific subject
 export function getTeacherForSubject(subject: string): TeacherProfile {
+  const teachers = getTeachers();
   const norm = subject.toLowerCase();
-  const match = DEFAULT_TEACHERS.find(t => t.subject === norm);
-  return match || DEFAULT_TEACHERS[0];
+  const match = teachers.find(t => t.subject === norm);
+  return match || teachers[0] || DEFAULT_TEACHERS[0];
 }
 
 // Auto-submit exam/practice result to backend API and local store

@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { THEORY_QUESTIONS } from './src/data/theoryQuestions.ts';
 import aiRoutes from './server/routes/aiRoutes.ts';
+import authRouter from './server/auth.js';
+import adminRoutes from './server/routes/adminRoutes.ts';
 
 dotenv.config();
 
@@ -17,7 +19,9 @@ const HOST = '0.0.0.0';
 
 app.use(express.json());
 
-// Mount modular AI Proxy router (API keys protected on server side)
+// Mount modular Auth, Admin & AI Proxy routers
+app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRoutes);
 app.use('/api/gemini', aiRoutes);
 
 // Initialize GoogleGenAI client according to SKILL guidelines
@@ -668,6 +672,108 @@ app.post('/api/submissions/:id/feedback', (req: Request, res: Response) => {
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || 'Lỗi lưu nhận xét giáo viên.' });
   }
+});
+
+// ==========================================
+// OWNER TEACHER MANAGEMENT (CRUD)
+// ==========================================
+let teachersStore = [
+  {
+    id: 't-word-01',
+    name: 'ThS. Nguyễn Tuấn Anh',
+    email: 'tuananh.mosword@edu.vn',
+    subject: 'word',
+    title: 'Trưởng Bộ Môn MOS Word (MO-100)',
+    department: 'Khoa Tin học Ứng dụng & Khảo thí Quốc tế',
+    phone: '0912.345.678',
+    avatarBg: 'bg-blue-600',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 't-excel-02',
+    name: 'ThS. Trần Thị Bích Mai',
+    email: 'bichmai.mosexcel@edu.vn',
+    subject: 'excel',
+    title: 'Chuyên Gia Huấn Luyện MOS Excel (MO-200)',
+    department: 'Bộ môn Phân tích Dữ liệu & Bảng tính',
+    phone: '0988.765.432',
+    avatarBg: 'bg-emerald-600',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 't-ppt-03',
+    name: 'ThS. Lê Hoàng Nam',
+    email: 'hoangnam.mosppt@edu.vn',
+    subject: 'powerpoint',
+    title: 'Giảng Viên Chuyên Sâu MOS PowerPoint (MO-300)',
+    department: 'Bộ môn Thiết kế Đa phương tiện & Thuyết trình',
+    phone: '0933.112.233',
+    avatarBg: 'bg-orange-600',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 't-all-04',
+    name: 'TS. Phạm Minh Đức',
+    email: 'minhduc.mosmaster@edu.vn',
+    subject: 'all',
+    title: 'Giám Đốc Trung Tâm Khảo Thí MOS Master',
+    department: 'Hội đồng Khảo thí Certiport Việt Nam',
+    phone: '0903.999.888',
+    avatarBg: 'bg-indigo-700',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+app.get('/api/teachers', (_req: Request, res: Response) => {
+  return res.json({ teachers: teachersStore });
+});
+
+app.post('/api/teachers', (req: Request, res: Response) => {
+  try {
+    const data = req.body;
+    if (!data.name || !data.email) {
+      return res.status(400).json({ error: 'Tên và email giảng viên là bắt buộc.' });
+    }
+    const newTeacher = {
+      id: data.id || 't-custom-' + Date.now(),
+      name: data.name,
+      email: data.email,
+      subject: data.subject || 'excel',
+      title: data.title || 'Giảng Viên Bộ Môn MOS',
+      department: data.department || 'Bộ môn Tin học',
+      phone: data.phone || '0900.000.000',
+      avatarBg: data.avatarBg || 'bg-blue-600',
+      createdAt: new Date().toISOString(),
+    };
+    teachersStore.unshift(newTeacher);
+    console.log(`[Owner Action] Added new teacher: ${newTeacher.name} (${newTeacher.email})`);
+    return res.status(201).json({ success: true, teacher: newTeacher });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/teachers/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const index = teachersStore.findIndex(t => t.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Không tìm thấy giảng viên.' });
+  }
+  teachersStore[index] = { ...teachersStore[index], ...updates };
+  console.log(`[Owner Action] Updated teacher: ${teachersStore[index].name}`);
+  return res.json({ success: true, teacher: teachersStore[index] });
+});
+
+app.delete('/api/teachers/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const initialLen = teachersStore.length;
+  teachersStore = teachersStore.filter(t => t.id !== id);
+  if (teachersStore.length === initialLen) {
+    return res.status(404).json({ error: 'Không tìm thấy giảng viên để xóa.' });
+  }
+  console.log(`[Owner Action] Deleted teacher ID: ${id}`);
+  return res.json({ success: true, message: 'Đã xóa giảng viên thành công.' });
 });
 
 // Endpoint: Protected Question Bank Proxy (Strips answers for students, reveals for teachers)

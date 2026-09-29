@@ -368,7 +368,7 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
     soundManager.playClick();
     
     await sendSubmissionToTeacher({
-      studentId: currentUser.id,
+      studentId: currentUser.id || 'usr-default',
       studentName: currentUser.name,
       studentCode: currentUser.studentCode || 'HV-2026',
       classRoom: currentUser.classRoom || 'Lớp MOS-TinHoc01',

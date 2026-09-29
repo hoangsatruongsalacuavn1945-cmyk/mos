@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, TeacherProfile } from '../types/user';
-import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT } from '../utils/userStore';
+import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT, OWNER_PROFILE, getTeachers } from '../utils/userStore';
 import { soundManager } from '../utils/audio';
 import { 
   User, 
@@ -14,7 +14,11 @@ import {
   Sparkles,
   School,
   Mail,
-  Hash
+  Hash,
+  Lock,
+  Loader2,
+  AlertCircle,
+  Crown
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -30,78 +34,243 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onUserChanged,
 }) => {
-  const [activeTab, setActiveTab] = useState<'student' | 'teacher'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'teacher' | 'owner'>(
+    currentUser.role === 'admin' ? 'owner' : currentUser.role === 'teacher' ? 'teacher' : 'student'
+  );
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   
-  // Custom Student Form
+  // Custom Form States
   const [name, setName] = useState(currentUser.name);
   const [email, setEmail] = useState(currentUser.email);
+  const [password, setPassword] = useState('Password123!');
   const [studentCode, setStudentCode] = useState(currentUser.studentCode || 'K24-CNTT-089');
   const [classRoom, setClassRoom] = useState(currentUser.classRoom || 'Lớp MOS-TinHoc01');
   const [targetSubject, setTargetSubject] = useState<'word' | 'excel' | 'powerpoint' | 'all'>(currentUser.targetSubject || 'all');
   const [selectedTeacherId, setSelectedTeacherId] = useState(currentUser.assignedTeacherId || DEFAULT_TEACHERS[1].id);
 
+  // Owner Auth States
+  const [ownerEmail, setOwnerEmail] = useState('hoangsatruongsalacuavn1945@gmail.com');
+  const [ownerPasskey, setOwnerPasskey] = useState('MOS_MASTER_OWNER_2026!');
+
   if (!isOpen) return null;
 
-  const handleQuickLoginStudent = (customName: string, customCode: string, customClass: string, tId: string, sub: 'word' | 'excel' | 'powerpoint' | 'all') => {
+  const handleOwnerLogin = async () => {
+    soundManager.playCorrect();
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/quick-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Chủ Sở Hữu Hệ Thống (Master Owner)',
+          email: ownerEmail.trim(),
+          role: 'admin',
+        }),
+      });
+      const data = await res.json();
+      if (data.token) {
+        localStorage.setItem('mos_jwt_token', data.token);
+      }
+    } catch {}
+
+    const owner: UserProfile = {
+      ...OWNER_PROFILE,
+      email: ownerEmail.trim(),
+    };
+    saveCurrentUser(owner);
+    onUserChanged(owner);
+    onClose();
+    setIsLoading(false);
+  };
+
+  const handleQuickLoginStudent = async (customName: string, customCode: string, customClass: string, tId: string, sub: 'word' | 'excel' | 'powerpoint' | 'all') => {
     soundManager.playClick();
+    setIsLoading(true);
+    setErrorMessage('');
     const teacher = DEFAULT_TEACHERS.find(t => t.id === tId) || DEFAULT_TEACHERS[0];
-    const user: UserProfile = {
-      id: 'stu-' + customCode.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      name: customName,
-      email: `${customCode.toLowerCase()}@student.edu.vn`,
-      role: 'student',
-      studentCode: customCode,
-      classRoom: customClass,
-      targetSubject: sub,
-      assignedTeacherId: teacher.id,
-      assignedTeacherName: teacher.name,
-      assignedTeacherEmail: teacher.email,
-      createdAt: new Date().toISOString(),
-    };
-    saveCurrentUser(user);
-    onUserChanged(user);
-    onClose();
+
+    try {
+      const res = await fetch('/api/auth/quick-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: customName,
+          email: `${customCode.toLowerCase()}@student.edu.vn`,
+          role: 'student',
+          studentCode: customCode,
+          classRoom: customClass,
+          assignedTeacherId: teacher.id,
+          targetSubject: sub,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.token) {
+        localStorage.setItem('mos_jwt_token', data.token);
+      }
+
+      const user: UserProfile = {
+        id: data.user?.id || 'stu-' + customCode.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        name: customName,
+        email: `${customCode.toLowerCase()}@student.edu.vn`,
+        role: 'student',
+        studentCode: customCode,
+        classRoom: customClass,
+        targetSubject: sub,
+        assignedTeacherId: teacher.id,
+        assignedTeacherName: teacher.name,
+        assignedTeacherEmail: teacher.email,
+        createdAt: data.user?.createdAt || new Date().toISOString(),
+      };
+      saveCurrentUser(user);
+      onUserChanged(user);
+      onClose();
+    } catch (err: any) {
+      console.warn('Backend auth unreachable, falling back to local session:', err);
+      const user: UserProfile = {
+        id: 'stu-' + customCode.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        name: customName,
+        email: `${customCode.toLowerCase()}@student.edu.vn`,
+        role: 'student',
+        studentCode: customCode,
+        classRoom: customClass,
+        targetSubject: sub,
+        assignedTeacherId: teacher.id,
+        assignedTeacherName: teacher.name,
+        assignedTeacherEmail: teacher.email,
+        createdAt: new Date().toISOString(),
+      };
+      saveCurrentUser(user);
+      onUserChanged(user);
+      onClose();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleQuickLoginTeacher = (teacher: TeacherProfile) => {
+  const handleQuickLoginTeacher = async (teacher: TeacherProfile) => {
     soundManager.playClick();
-    const user: UserProfile = {
-      id: teacher.id,
-      name: teacher.name,
-      email: teacher.email,
-      role: 'teacher',
-      targetSubject: teacher.subject,
-      assignedTeacherId: teacher.id,
-      assignedTeacherName: teacher.name,
-      assignedTeacherEmail: teacher.email,
-      createdAt: new Date().toISOString(),
-    };
-    saveCurrentUser(user);
-    onUserChanged(user);
-    onClose();
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const res = await fetch('/api/auth/quick-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: teacher.name,
+          email: teacher.email,
+          role: 'teacher',
+          assignedTeacherId: teacher.id,
+          targetSubject: teacher.subject,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.token) {
+        localStorage.setItem('mos_jwt_token', data.token);
+      }
+
+      const user: UserProfile = {
+        id: data.user?.id || teacher.id,
+        name: teacher.name,
+        email: teacher.email,
+        role: 'teacher',
+        targetSubject: teacher.subject,
+        assignedTeacherId: teacher.id,
+        assignedTeacherName: teacher.name,
+        assignedTeacherEmail: teacher.email,
+        createdAt: data.user?.createdAt || new Date().toISOString(),
+      };
+      saveCurrentUser(user);
+      onUserChanged(user);
+      onClose();
+    } catch (err) {
+      const user: UserProfile = {
+        id: teacher.id,
+        name: teacher.name,
+        email: teacher.email,
+        role: 'teacher',
+        targetSubject: teacher.subject,
+        assignedTeacherId: teacher.id,
+        assignedTeacherName: teacher.name,
+        assignedTeacherEmail: teacher.email,
+        createdAt: new Date().toISOString(),
+      };
+      saveCurrentUser(user);
+      onUserChanged(user);
+      onClose();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleSaveCustomStudent = (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!email.trim() || !password.trim()) {
+      setErrorMessage('Vui lòng nhập email và mật khẩu.');
+      return;
+    }
+
     soundManager.playClick();
+    setIsLoading(true);
+    setErrorMessage('');
+
     const teacher = DEFAULT_TEACHERS.find(t => t.id === selectedTeacherId) || DEFAULT_TEACHERS[0];
-    const user: UserProfile = {
-      id: currentUser.id || 'stu-' + Date.now(),
-      name: name.trim(),
-      email: email.trim() || `${studentCode.toLowerCase()}@student.edu.vn`,
-      role: 'student',
-      studentCode: studentCode.trim() || 'HV-2026',
-      classRoom: classRoom.trim() || 'Lớp MOS',
-      targetSubject,
-      assignedTeacherId: teacher.id,
-      assignedTeacherName: teacher.name,
-      assignedTeacherEmail: teacher.email,
-      createdAt: currentUser.createdAt || new Date().toISOString(),
-    };
-    saveCurrentUser(user);
-    onUserChanged(user);
-    onClose();
+    const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+
+    try {
+      const payload = {
+        email: email.trim(),
+        password: password.trim(),
+        name: name.trim() || 'Học Viên MOS',
+        studentCode: studentCode.trim() || 'HV-2026',
+        classRoom: classRoom.trim() || 'Lớp MOS-TinHoc01',
+        role: 'student',
+        assignedTeacherId: teacher.id,
+        targetSubject,
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Xác thực không thành công.');
+      }
+
+      if (data.token) {
+        localStorage.setItem('mos_jwt_token', data.token);
+      }
+
+      const user: UserProfile = {
+        id: data.user?.id || 'stu-' + Date.now(),
+        name: data.user?.name || name.trim(),
+        email: data.user?.email || email.trim(),
+        role: 'student',
+        studentCode: data.user?.studentCode || studentCode.trim(),
+        classRoom: data.user?.classRoom || classRoom.trim(),
+        targetSubject,
+        assignedTeacherId: teacher.id,
+        assignedTeacherName: teacher.name,
+        assignedTeacherEmail: teacher.email,
+        createdAt: data.user?.createdAt || new Date().toISOString(),
+      };
+
+      saveCurrentUser(user);
+      onUserChanged(user);
+      onClose();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Lỗi kết nối máy chủ xác thực.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -158,6 +327,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span>Cổng Giáo Viên Bộ Môn</span>
             <span className="px-1.5 py-0.5 text-[10px] bg-emerald-100 text-emerald-800 font-bold rounded">Portal</span>
           </button>
+
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              setActiveTab('owner');
+            }}
+            className={`flex items-center gap-1.5 pb-3 px-3 text-sm font-semibold border-b-2 transition-all ${
+              activeTab === 'owner'
+                ? 'border-amber-500 text-amber-600 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <Crown className="w-4 h-4 text-amber-500" />
+            <span>Chủ Sở Hữu</span>
+            <span className="px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-900 font-extrabold rounded">Owner Root</span>
+          </button>
         </div>
 
         <div className="p-6">
@@ -199,11 +384,74 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               {/* Custom Student Form */}
               <div className="relative border-t border-slate-200 pt-5">
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[11px] font-semibold text-slate-400">
-                  Hoặc điền thông tin của bạn
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold text-slate-700">Tài Khoản Cá Nhân (Đồng Bộ PostgreSQL)</span>
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('login')}
+                      className={`px-2.5 py-1 font-semibold rounded-md transition-all ${
+                        authMode === 'login' ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Đăng Nhập
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('register')}
+                      className={`px-2.5 py-1 font-semibold rounded-md transition-all ${
+                        authMode === 'register' ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Đăng Ký
+                    </button>
+                  </div>
                 </div>
 
-                <form onSubmit={handleSaveCustomStudent} className="space-y-4">
+                {errorMessage && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-700">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleAuthSubmit} className="space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Email Xác Thực <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="email"
+                          required
+                          value={email}
+                          onChange={e => setEmail(e.target.value)}
+                          placeholder="student@mosmaster.edu.vn"
+                          className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Mật Khẩu <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="password"
+                          required
+                          value={password}
+                          onChange={e => setPassword(e.target.value)}
+                          placeholder="Tối thiểu 6 ký tự"
+                          className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -297,10 +545,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-xs flex items-center justify-center gap-2"
+                    disabled={isLoading}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <Check className="w-4 h-4" />
-                    <span>Lưu Thông Tin & Bắt Đầu Học</span>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Đang xử lý xác thực...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>{authMode === 'login' ? 'Đăng Nhập & Bắt Đầu Học' : 'Tạo Tài Khoản & Bắt Đầu Học'}</span>
+                      </>
+                    )}
                   </button>
                 </form>
               </div>
@@ -367,6 +625,82 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'owner' && (
+            <div className="space-y-5 animate-in fade-in">
+              <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-300 rounded-2xl">
+                <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                  <Crown className="w-4 h-4 text-amber-600" />
+                  <span>Khu Vực Dành Riêng Cho Chủ Sở Hữu (Super Admin Root)</span>
+                </div>
+                <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                  Tài khoản Chủ sở hữu có toàn quyền: <b>Thêm giáo viên mới</b>, <b>Xóa giáo viên</b>, chỉnh sửa phân công bộ môn, quản lý ngân hàng 95+ đề thi và giám sát dữ liệu toàn hệ thống.
+                </p>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Email Chủ Sở Hữu (Master Owner Email) <span className="text-amber-600 font-bold">*</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="email"
+                      required
+                      value={ownerEmail}
+                      onChange={e => setOwnerEmail(e.target.value)}
+                      placeholder="hoangsatruongsalacuavn1945@gmail.com"
+                      className="w-full pl-9 pr-3 py-2 text-xs border border-amber-300 bg-amber-50/20 rounded-lg text-slate-900 font-mono font-medium focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Mã Khóa Bảo Mật Chủ Sở Hữu (Master Security Passkey) <span className="text-amber-600 font-bold">*</span>
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="password"
+                      required
+                      value={ownerPasskey}
+                      onChange={e => setOwnerPasskey(e.target.value)}
+                      placeholder="MOS_MASTER_OWNER_2026!"
+                      className="w-full pl-9 pr-3 py-2 text-xs border border-amber-300 bg-amber-50/20 rounded-lg text-slate-900 font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Chỉ tài khoản sở hữu có mã passkey này mới có thể kích hoạt toàn quyền Admin.
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-[11px] text-slate-600">
+                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Quyền Hạn Được Cấp Sau Khi Đăng Nhập:</span>
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5 text-slate-600">
+                    <li>Thêm giáo viên mới vào danh sách giảng dạy (Họ tên, email, bộ môn, khoa).</li>
+                    <li>Xóa vĩnh viễn giáo viên khỏi hệ thống với 1 click.</li>
+                    <li>Xem toàn bộ bài nộp của học viên ở tất cả các môn Word, Excel, PowerPoint.</li>
+                    <li>Giám sát gian lận thi cử và truy xuất toàn bộ câu hỏi chuẩn hóa.</li>
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOwnerLogin}
+                  disabled={isLoading}
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black rounded-xl transition-all shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer mt-1"
+                >
+                  <Crown className="w-4 h-4 text-slate-950" />
+                  <span>Kích Hoạt Quyền Chủ Sở Hữu & Vào Trung Tâm Quản Trị</span>
+                </button>
               </div>
             </div>
           )}

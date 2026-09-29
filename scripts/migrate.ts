@@ -133,7 +133,29 @@ export async function runMigration(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_exam_results_is_correct ON exam_results(is_correct);
     `);
 
-    // 5. SECURE VIEW: v_student_questions (Shields correct_answer from client DevTools)
+    // 5. TABLE: audit_logs (id, actor_id, actor_name, actor_role, action, target_type, target_id, target_name, details, created_at)
+    console.log('📦 [Migration] Creating table `audit_logs`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        actor_id VARCHAR(100) NOT NULL,
+        actor_name VARCHAR(150) NOT NULL,
+        actor_role VARCHAR(50) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        target_type VARCHAR(50) NOT NULL,
+        target_id VARCHAR(100),
+        target_name VARCHAR(150),
+        details JSONB DEFAULT '{}'::jsonb,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+    `);
+
+    // 6. SECURE VIEW: v_student_questions (Shields correct_answer from client DevTools)
     console.log('🛡️ [Migration] Creating secure view `v_student_questions`...');
     await client.query(`
       CREATE OR REPLACE VIEW v_student_questions AS
