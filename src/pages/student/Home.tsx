@@ -8,6 +8,9 @@ import { AITutorChat } from '../../components/AITutorChat';
 import { AIPracticeGenerator } from '../../components/AIPracticeGenerator';
 import { PersonalizedRoadmap } from '../../components/PersonalizedRoadmap';
 import { RealFileGrader } from '../../components/RealFileGrader';
+import { Dashboard } from '../../components/Dashboard';
+import { QuizEngine } from '../../components/QuizEngine';
+import { ProgressDashboard } from '../../components/ProgressDashboard';
 import { SystemCheckModal } from '../../components/SystemCheckModal';
 import { LeaderboardModal } from '../../components/LeaderboardModal';
 import { MOSCertificateModal } from '../../components/MOSCertificateModal';
@@ -35,7 +38,7 @@ import {
   Laptop
 } from 'lucide-react';
 
-export type StudentNavTab = 'theory' | 'practical' | 'file-grader' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice';
+export type StudentNavTab = 'hub' | 'progress-charts' | 'quiz-engine' | 'theory' | 'practical' | 'file-grader' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -160,6 +163,36 @@ export const Home: React.FC = () => {
       <div className="bg-white border-b border-slate-200 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto py-2 text-xs">
           <button
+            onClick={() => { soundManager.playClick(); setCurrentTab('hub'); }}
+            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              currentTab === 'hub' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>Trung Tâm Học Tập (Hub)</span>
+          </button>
+
+          <button
+            onClick={() => { soundManager.playClick(); setCurrentTab('progress-charts'); }}
+            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              currentTab === 'progress-charts' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <BarChart2 className="w-4 h-4 text-indigo-400" />
+            <span>Biểu Đồ Tiến Độ (Recharts)</span>
+          </button>
+
+          <button
+            onClick={() => { soundManager.playClick(); setCurrentTab('quiz-engine'); }}
+            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              currentTab === 'quiz-engine' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Khảo Thí Quiz Engine (Firestore)</span>
+          </button>
+
+          <button
             onClick={() => { soundManager.playClick(); setCurrentTab('theory'); }}
             className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
               currentTab === 'theory' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
@@ -243,6 +276,28 @@ export const Home: React.FC = () => {
 
       {/* Tab Panels */}
       <div className="py-6">
+        {currentTab === 'hub' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <Dashboard 
+              onSelectSubject={(sub) => setSelectedSubject(sub)}
+              onSelectTab={(tab) => setCurrentTab(tab as StudentNavTab)}
+              onStartExam={(sub) => navigate(`/thi-thu?subject=${sub || 'excel'}`)}
+            />
+          </div>
+        )}
+
+        {currentTab === 'progress-charts' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <ProgressDashboard />
+          </div>
+        )}
+
+        {currentTab === 'quiz-engine' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <QuizEngine initialSubject={selectedSubject === 'all' ? 'excel' : selectedSubject} />
+          </div>
+        )}
+
         {currentTab === 'theory' && (
           <TheoryQuiz
             selectedSubject={selectedSubject}

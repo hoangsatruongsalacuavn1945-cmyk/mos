@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role and basic info",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin", "guest"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Learning progress and quiz scores across Word, Excel, and PowerPoint paths",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "word": { "type": "object" },
+        "excel": { "type": "object" },
+        "powerpoint": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "word", "excel", "powerpoint", "updatedAt"]
+    },
+    "QuizScore": {
+      "title": "QuizScore",
+      "description": "Quiz submission record for learning path tests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "subject": { "type": "string", "enum": ["word", "excel", "powerpoint"] },
+        "score": { "type": "number" },
+        "total": { "type": "number" },
+        "percentage": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "userId", "subject", "score", "total", "percentage", "date"]
+    },
+    "QuestionItem": {
+      "title": "QuestionItem",
+      "description": "Multiple choice examination question for MOS certification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string", "enum": ["word", "excel", "powerpoint"] },
+        "domainId": { "type": "string" },
+        "domainName": { "type": "string" },
+        "title": { "type": "string" },
+        "scenario": { "type": "string" },
+        "options": { "type": "array" },
+        "correctAnswer": { "type": "string" },
+        "explanation": { "type": "string" },
+        "officialRibbonPath": { "type": "string" },
+        "shortcutTip": { "type": "string" },
+        "points": { "type": "number" }
+      },
+      "required": ["id", "subject", "title", "options", "correctAnswer", "explanation"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "/user_progress/{userId}": {
+      "schema": "UserProgress",
+      "description": "User progress for learning paths and quiz scores"
+    },
+    "/quiz_scores/{scoreId}": {
+      "schema": "QuizScore",
+      "description": "Completed quiz scores"
+    },
+    "/questions/{questionId}": {
+      "schema": "QuestionItem",
+      "description": "Multiple-choice MOS questions"
+    }
+  }
+}

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { UserProfile, TeacherProfile, Submission, IUser } from '../types/user';
+import { create } from 'zustand';
+import { UserProfile, TeacherProfile, Submission, IUser, UserRole } from '../types/user';
 
 export const DEFAULT_GUEST: IUser = {
   name: 'Khách',
@@ -151,96 +151,168 @@ export function updateTeacher(teacherId: string, updates: Partial<TeacherProfile
   return teachers[index];
 }
 
-export function getCurrentUser(): UserProfile {
-  try {
-    const raw = localStorage.getItem(USER_STORAGE_KEY);
-    if (!raw) {
-      saveCurrentUser(DEFAULT_STUDENT);
-      return DEFAULT_STUDENT;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return DEFAULT_STUDENT;
-  }
-}
+// Initial state loader: defaults to 'guest' role
+const getInitialAuthState = () => {
+  const token = typeof window !== 'undefined' 
+    ? (localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('accessToken') || '') 
+    : '';
 
-export function saveCurrentUser(user: UserProfile): void {
   try {
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem(USER_STORAGE_KEY) : null;
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      if (parsed && parsed.role) {
+        const role: UserRole = parsed.role;
+        const fullName = parsed.fullName || parsed.name || (role === 'guest' ? 'Khách' : 'Người dùng');
+        return {
+          role,
+          fullName,
+          token,
+          user: {
+            ...parsed,
+            role,
+            fullName,
+            name: fullName,
+          } as IUser,
+        };
+      }
+    }
   } catch (e) {
-    console.error('Error saving current user:', e);
+    console.warn('Failed to parse cached auth state:', e);
   }
-}
 
-// Reactive Auth Store (Compatible with requested Zustand pattern)
-const authListeners = new Set<() => void>();
+  // Initializing with 'guest' by default as explicitly requested
+  const guestUser: IUser = {
+    id: 'guest',
+    name: 'Khách',
+    fullName: 'Khách',
+    email: 'guest@student.edu.vn',
+    role: 'guest',
+  };
 
-export const authStore = {
-  getUser: (): IUser => getCurrentUser(),
-  getToken: (): string => {
-    try {
-      return localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('accessToken') || '';
-    } catch {
-      return '';
-    }
-  },
-  login: (userData: any, token?: string) => {
-    if (userData && !userData.name && userData.fullName) {
-      userData.name = userData.fullName;
-    }
-    if (token) {
-      userData.token = token;
-      try {
-        localStorage.setItem('mos_auth_token_jwt', token);
-        localStorage.setItem('accessToken', token);
-      } catch {}
-    }
-    saveCurrentUser(userData);
-    authListeners.forEach(fn => fn());
-  },
-  logout: () => {
-    const guestUser: IUser = { name: 'Khách', email: 'guest@student.edu.vn', role: 'guest' };
-    try {
-      localStorage.removeItem('mos_auth_token_jwt');
-      localStorage.removeItem('accessToken');
-    } catch {}
-    saveCurrentUser(guestUser);
-    authListeners.forEach(fn => fn());
-  },
-  subscribe: (fn: () => void) => {
-    authListeners.add(fn);
-    return () => {
-      authListeners.delete(fn);
-    };
-  }
+  return {
+    role: 'guest' as UserRole,
+    fullName: 'Khách',
+    token: '',
+    user: guestUser,
+  };
 };
 
 export interface AuthState {
-  user: IUser;
+  role: UserRole;
+  fullName: string;
   token: string;
+  user: IUser;
   login: (userData: any, token?: string) => void;
   logout: () => void;
+  setUser: (userData: Partial<IUser>) => void;
 }
 
-export function useAuthStore<T = AuthState>(selector?: (state: AuthState) => T): T {
-  const [user, setUser] = useState<IUser>(authStore.getUser());
-  const [token, setToken] = useState<string>(authStore.getToken());
+export const useAuthStore = create<AuthState>((set) => {
+  const initial = getInitialAuthState();
+  return {
+    role: initial.role,
+    fullName: initial.fullName,
+    token: initial.token,
+    user: initial.user,
 
-  useEffect(() => {
-    return authStore.subscribe(() => {
-      setUser(authStore.getUser());
-      setToken(authStore.getToken());
-    });
-  }, []);
+    login: (userData: any, token?: string) => {
+      const role: UserRole = userData.role || 'student';
+      const fullName = userData.fullName || userData.name || 'Người dùng';
+      const authToken = token || userData.token || '';
 
-  const state: AuthState = {
-    user,
-    token,
-    login: authStore.login,
-    logout: authStore.logout,
+      const updatedUser: IUser = {
+        ...userData,
+        role,
+        fullName,
+        name: fullName,
+        token: authToken,
+      };
+
+      try {
+        if (authToken) {
+          localStorage.setItem('mos_auth_token_jwt', authToken);
+          localStorage.setItem('accessToken', authToken);
+        }
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      } catch (e) {
+        console.error('Error persisting auth state:', e);
+      }
+
+      set({
+        role,
+        fullName,
+        token: authToken,
+        user: updatedUser,
+      });
+    },
+
+    logout: () => {
+      const guestUser: IUser = {
+        id: 'guest',
+        name: 'Khách',
+        fullName: 'Khách',
+        email: 'guest@student.edu.vn',
+        role: 'guest',
+      };
+
+      try {
+        localStorage.removeItem('mos_auth_token_jwt');
+        localStorage.removeItem('accessToken');
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(guestUser));
+      } catch (e) {
+        console.error('Error clearing auth state:', e);
+      }
+
+      set({
+        role: 'guest',
+        fullName: 'Khách',
+        token: '',
+        user: guestUser,
+      });
+    },
+
+    setUser: (userData: Partial<IUser>) => {
+      set((state) => {
+        const fullName = userData.fullName || userData.name || state.fullName;
+        const role = userData.role || state.role;
+        const updatedUser: IUser = {
+          ...state.user,
+          ...userData,
+          fullName,
+          name: fullName,
+          role,
+        };
+
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+        } catch {}
+
+        return {
+          user: updatedUser,
+          role,
+          fullName,
+        };
+      });
+    },
   };
+});
 
-  return selector ? selector(state) : (state as unknown as T);
+// Legacy helpers & store facade to guarantee backward compatibility
+export const authStore = {
+  getUser: (): IUser => useAuthStore.getState().user,
+  getToken: (): string => useAuthStore.getState().token,
+  login: (userData: any, token?: string) => useAuthStore.getState().login(userData, token),
+  logout: () => useAuthStore.getState().logout(),
+  subscribe: (fn: () => void) => useAuthStore.subscribe(fn),
+};
+
+export function getCurrentUser(): UserProfile {
+  return useAuthStore.getState().user as UserProfile;
+}
+
+export function saveCurrentUser(user: UserProfile): void {
+  useAuthStore.getState().setUser(user);
 }
 
 // Find appropriate teacher for a specific subject

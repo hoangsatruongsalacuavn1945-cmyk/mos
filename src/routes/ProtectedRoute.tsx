@@ -7,16 +7,18 @@ interface Props {
 }
 
 export const ProtectedRoute: React.FC<Props> = ({ allowedRoles }) => {
-  const { user } = useAuthStore();
+  const { role, user } = useAuthStore();
   const location = useLocation();
 
+  const currentRole = role || user?.role || 'guest';
+
   // Nếu người dùng là học sinh hoặc khách -> Đá về trang đăng nhập dành riêng cho GV/Admin
-  if (user.role === 'guest' || user.role === 'student') {
+  if (currentRole === 'guest' || currentRole === 'student') {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Nếu đã đăng nhập nhưng không đủ quyền (VD: Teacher cố vào trang Admin)
-  if (!allowedRoles.includes(user.role as 'teacher' | 'admin')) {
+  if (!allowedRoles.includes(currentRole as 'teacher' | 'admin')) {
     return <Navigate to="/unauthorized" replace />;
   }
 
