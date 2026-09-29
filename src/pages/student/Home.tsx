@@ -11,10 +11,12 @@ import { RealFileGrader } from '../../components/RealFileGrader';
 import { Dashboard } from '../../components/Dashboard';
 import { QuizEngine } from '../../components/QuizEngine';
 import { ProgressDashboard } from '../../components/ProgressDashboard';
+import { Leaderboard } from '../../components/Leaderboard';
 import { SystemCheckModal } from '../../components/SystemCheckModal';
 import { LeaderboardModal } from '../../components/LeaderboardModal';
 import { MOSCertificateModal } from '../../components/MOSCertificateModal';
 import { SupervisorReportModal } from '../../components/SupervisorReportModal';
+import { GoogleSheetsBackupModal } from '../../components/GoogleSheetsBackupModal';
 import { MOSSubject, UserStats } from '../../types/mos';
 import { loadUserStats } from '../../utils/storage';
 import { useAuthStore } from '../../utils/userStore';
@@ -38,11 +40,11 @@ import {
   Laptop
 } from 'lucide-react';
 
-export type StudentNavTab = 'hub' | 'progress-charts' | 'quiz-engine' | 'theory' | 'practical' | 'file-grader' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice';
+export type StudentNavTab = 'hub' | 'leaderboard' | 'progress-charts' | 'quiz-engine' | 'theory' | 'practical' | 'file-grader' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, role } = useAuthStore();
   const [currentTab, setCurrentTab] = useState<StudentNavTab>('theory');
   const [selectedSubject, setSelectedSubject] = useState<MOSSubject>('all');
   const [stats, setStats] = useState<UserStats>(loadUserStats());
@@ -52,6 +54,7 @@ export const Home: React.FC = () => {
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [isCertificateOpen, setIsCertificateOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
   const [certificateInfo, setCertificateInfo] = useState<{ subject: string; score: number }>({
     subject: 'excel',
     score: 850,
@@ -145,6 +148,20 @@ export const Home: React.FC = () => {
               <span>Bảng Vàng</span>
             </button>
 
+            {(role === 'admin' || role === 'teacher') && (
+              <button
+                onClick={() => {
+                  soundManager.playClick();
+                  setIsSheetsModalOpen(true);
+                }}
+                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="Quản trị dữ liệu Google Sheets (Chỉ Giáo viên & Ban Quản trị)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Sao Lưu Google Sheets</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 soundManager.playClick();
@@ -170,6 +187,16 @@ export const Home: React.FC = () => {
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
             <span>Trung Tâm Học Tập (Hub)</span>
+          </button>
+
+          <button
+            onClick={() => { soundManager.playClick(); setCurrentTab('leaderboard'); }}
+            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
+              currentTab === 'leaderboard' ? 'bg-amber-500 text-slate-950 font-black shadow-xs' : 'text-amber-700 hover:bg-amber-50'
+            }`}
+          >
+            <Trophy className="w-4 h-4 text-amber-500" />
+            <span>Bảng Xếp Hạng Tiến Độ</span>
           </button>
 
           <button
@@ -286,6 +313,20 @@ export const Home: React.FC = () => {
           </div>
         )}
 
+        {currentTab === 'leaderboard' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <Leaderboard 
+              onSelectAction={(action, subject) => {
+                if (action === 'study') {
+                  setCurrentTab('theory');
+                } else {
+                  navigate(`/thi-thu?subject=${subject || 'excel'}`);
+                }
+              }}
+            />
+          </div>
+        )}
+
         {currentTab === 'progress-charts' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <ProgressDashboard />
@@ -380,6 +421,12 @@ export const Home: React.FC = () => {
           onClose={() => setIsReportOpen(false)}
         />
       )}
+
+      {/* Google Sheets Backup & Sync Modal */}
+      <GoogleSheetsBackupModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+      />
     </div>
   );
 };

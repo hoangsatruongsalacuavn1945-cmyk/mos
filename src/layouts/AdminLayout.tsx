@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../utils/userStore';
 import { soundManager } from '../utils/audio';
+import { ThemeLanguageSwitcher } from '../components/ThemeLanguageSwitcher';
 import { 
   ShieldCheck, 
   Crown, 
@@ -54,12 +55,15 @@ export const AdminLayout: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800"
-        >
-          {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeLanguageSwitcher compact />
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+          >
+            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
       {/* Dedicated Private Sidebar (Desktop + Mobile overlay) */}
@@ -199,7 +203,12 @@ export const AdminLayout: React.FC = () => {
         </div>
 
         {/* Bottom Actions */}
-        <div className="pt-4 border-t border-slate-800 space-y-2">
+        <div className="pt-4 border-t border-slate-800 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] text-slate-400 font-medium">Giao diện & Ngôn ngữ:</span>
+            <ThemeLanguageSwitcher compact />
+          </div>
+
           <button
             onClick={handleLogout}
             className="w-full py-2.5 px-3 bg-red-950/40 hover:bg-red-900/60 border border-red-800/40 text-red-300 hover:text-red-200 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"

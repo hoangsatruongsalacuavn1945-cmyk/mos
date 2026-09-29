@@ -6,14 +6,12 @@ import {
   User, 
   Mail, 
   Lock, 
-  BookOpen, 
   CheckCircle2, 
   AlertCircle, 
   ArrowLeft, 
-  ShieldCheck, 
-  LogIn,
-  Sparkles
+  ShieldCheck
 } from 'lucide-react';
+import { appendUserRegistrationToSheet } from '../../services/googleSheetsService';
 
 interface ITeacher {
   _id: string;
@@ -85,12 +83,24 @@ export default function StudentRegister() {
         throw new Error(data.message || data.error || 'Có lỗi xảy ra khi đăng ký.');
       }
 
+      // Auto-save account creation to Google Sheets silently in background for Teacher/Owner
+      const selectedTeacher = teachers.find(t => t._id === formData.teacherId);
+      appendUserRegistrationToSheet({
+        uid: data.user?.studentCode || data.user?.id || 'HV-NEW',
+        name: formData.fullName,
+        email: formData.email,
+        role: 'student',
+        classRoom: 'Lớp MOS Master',
+        teacherName: selectedTeacher?.fullName || 'Giáo viên bộ môn',
+        provider: 'Tài khoản đăng ký mới',
+      }).catch((e) => console.warn('Background Google Sheets registration sync:', e));
+
       soundManager.playCorrect();
-      setSuccessMsg(data.message || 'Đăng ký thành công! Đang chuyển hướng...');
-      
+      setSuccessMsg('Đăng ký tài khoản thành công! Đang chuyển hướng đến trang đăng nhập...');
+
       setTimeout(() => {
         navigate('/login');
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       soundManager.playWrong();
       setError(err.message || 'Có lỗi xảy ra khi đăng ký');
@@ -136,9 +146,9 @@ export default function StudentRegister() {
         )}
 
         {successMsg && (
-          <div className="p-3 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{successMsg}</span>
+          <div className="p-3.5 bg-emerald-950/70 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs flex items-center gap-2.5 animate-in fade-in">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span className="font-semibold">{successMsg}</span>
           </div>
         )}
 

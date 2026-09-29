@@ -36,8 +36,11 @@ import {
   LogOut,
   Upload,
   Tag,
-  Lock
+  Lock,
+  ExternalLink
 } from 'lucide-react';
+import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { getMasterGoogleSheetUrl } from '../services/googleSheetsService';
 
 interface TeacherPortalProps {
   currentUser: UserProfile;
@@ -327,6 +330,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Đồng Bộ Mới</span>
             </button>
+
+            <a
+              href={useGoogleSheetsStore.getState().spreadsheetUrl || getMasterGoogleSheetUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-1.5 border border-emerald-400/40"
+              title="Mở Bảng Tính Google Sheets Dữ Liệu Học Viên & Khảo Thí (Chỉ Giáo Viên & Chủ Sở Hữu)"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+              <span>Google Sheets Quản Trị</span>
+              <ExternalLink className="w-3.5 h-3.5 text-emerald-200" />
+            </a>
 
             <button
               onClick={() => {

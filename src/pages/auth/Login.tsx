@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../../utils/userStore';
 import { useUserProgressStore } from '../../utils/userProgressStore';
+import { useGoogleSheetsStore } from '../../utils/googleSheetsStore';
+import { saveStoredGoogleToken, appendUserRegistrationToSheet } from '../../services/googleSheetsService';
 import { soundManager } from '../../utils/audio';
 import { signInWithGoogle, db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -59,8 +61,13 @@ export default function Login() {
     soundManager.playClick();
 
     try {
-      const fbUser = await signInWithGoogle();
-      if (!fbUser) throw new Error('Không thể hoàn tất đăng nhập bằng Google.');
+      const result = await signInWithGoogle();
+      if (!result || !result.user) throw new Error('Không thể hoàn tất đăng nhập bằng Google.');
+      const fbUser = result.user;
+
+      if (result.accessToken) {
+        saveStoredGoogleToken(result.accessToken);
+      }
 
       // Check or create user profile in Firestore
       const userDocRef = doc(db, 'users', fbUser.uid);
@@ -83,10 +90,30 @@ export default function Login() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
+
+        // Automatically backup new account creation to the master Google Sheet
+        appendUserRegistrationToSheet({
+          uid: fbUser.uid,
+          name: displayName,
+          email: fbUser.email || '',
+          role: 'student',
+          classRoom: 'Lớp MOS Master Quốc Tế',
+          teacherName: 'Trung Tâm Khảo Thí',
+          provider: 'Google Sign-In (Khởi Tạo)',
+        }).catch((e) => console.warn('Google Sheets auto-register warning:', e));
       }
 
       // Sync progress from Firestore for this user
       await useUserProgressStore.getState().loadFromFirestore(fbUser.uid);
+
+      // Auto-backup login to Google Sheets
+      useGoogleSheetsStore.getState().backupUserLogin({
+        uid: fbUser.uid,
+        name: displayName,
+        email: fbUser.email || '',
+        role: role,
+        provider: 'Google Sign-In',
+      }).catch((e) => console.warn('Google Sheets auto-backup warning:', e));
 
       const token = await fbUser.getIdToken();
       const userObj = {
@@ -130,6 +157,15 @@ export default function Login() {
       if (!response.ok) {
         throw new Error(data.message || data.error || 'Email hoặc mật khẩu không chính xác!');
       }
+
+      // Auto-backup login to Google Sheets
+      useGoogleSheetsStore.getState().backupUserLogin({
+        uid: data.user.id || data.user.uid || 'user-email',
+        name: data.user.name || data.user.fullName || data.user.email,
+        email: data.user.email,
+        role: data.user.role,
+        provider: 'Tài khoản hệ thống (Email/Password)',
+      }).catch((e) => console.warn('Google Sheets auto-backup warning:', e));
 
       handleLoginSuccess(data.token, data.user);
     } catch (err: any) {

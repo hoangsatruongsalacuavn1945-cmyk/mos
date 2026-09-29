@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile, TeacherProfile } from '../types/user';
-import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT, OWNER_PROFILE, getTeachers } from '../utils/userStore';
+import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT, OWNER_PROFILE, getTeachers, useAuthStore } from '../utils/userStore';
+import { appendUserRegistrationToSheet, appendUserLoginToSheet } from '../services/googleSheetsService';
 import { soundManager } from '../utils/audio';
 import { 
   User, 
@@ -80,6 +81,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       email: ownerEmail.trim(),
     };
     saveCurrentUser(owner);
+    useAuthStore.getState().login(owner, 'owner-jwt-token');
+    appendUserLoginToSheet({
+      uid: owner.id,
+      name: owner.name,
+      email: owner.email || '',
+      role: 'admin',
+      provider: 'Chủ sở hữu (Owner Root)',
+    }).catch((e) => console.warn('Owner Google Sheets sync:', e));
     onUserChanged(owner);
     onClose();
     setIsLoading(false);
@@ -125,6 +134,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         createdAt: data.user?.createdAt || new Date().toISOString(),
       };
       saveCurrentUser(user);
+      useAuthStore.getState().login(user, data.token);
+      appendUserLoginToSheet({
+        uid: user.id,
+        name: user.name,
+        email: user.email || '',
+        role: 'student',
+        provider: 'Đăng nhập nhanh Học viên',
+      }).catch((e) => console.warn('Student quick-login Google Sheets sync:', e));
       onUserChanged(user);
       onClose();
     } catch (err: any) {
@@ -185,6 +202,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         createdAt: data.user?.createdAt || new Date().toISOString(),
       };
       saveCurrentUser(user);
+      useAuthStore.getState().login(user, data.token);
+      appendUserLoginToSheet({
+        uid: user.id,
+        name: user.name,
+        email: user.email,
+        role: 'teacher',
+        provider: 'Cổng Giáo viên bộ môn',
+      }).catch((e) => console.warn('Teacher login Google Sheets sync:', e));
       onUserChanged(user);
       onClose();
     } catch (err) {
@@ -200,6 +225,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         createdAt: new Date().toISOString(),
       };
       saveCurrentUser(user);
+      useAuthStore.getState().login(user);
+      appendUserLoginToSheet({
+        uid: user.id,
+        name: user.name,
+        email: user.email,
+        role: 'teacher',
+        provider: 'Cổng Giáo viên (Offline)',
+      }).catch((e) => console.warn('Teacher login Google Sheets sync:', e));
       onUserChanged(user);
       onClose();
     } finally {
@@ -264,6 +297,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       };
 
       saveCurrentUser(user);
+      useAuthStore.getState().login(user, data.token);
+
+      // Automatically trigger Google Sheets synchronization
+      if (authMode === 'register') {
+        appendUserRegistrationToSheet({
+          uid: user.studentCode || user.id,
+          name: user.name,
+          email: user.email,
+          role: 'student',
+          classRoom: user.classRoom,
+          teacherName: teacher.name,
+          provider: 'Đăng ký tài khoản (Modal Form)',
+        }).catch((e) => console.warn('Modal registration Google Sheets sync:', e));
+      } else {
+        appendUserLoginToSheet({
+          uid: user.id,
+          name: user.name,
+          email: user.email,
+          role: 'student',
+          provider: 'Đăng nhập hệ thống (Modal Form)',
+        }).catch((e) => console.warn('Modal login Google Sheets sync:', e));
+      }
+
       onUserChanged(user);
       onClose();
     } catch (err: any) {

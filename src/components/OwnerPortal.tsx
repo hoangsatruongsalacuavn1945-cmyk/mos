@@ -7,6 +7,8 @@ import {
   updateTeacher, 
   fetchSubmissions 
 } from '../utils/userStore';
+import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { getMasterGoogleSheetUrl } from '../services/googleSheetsService';
 import { soundManager } from '../utils/audio';
 import { 
   Crown, 
@@ -548,6 +550,18 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
             </div>
 
             <div className="flex items-center gap-2.5 flex-wrap">
+              <a
+                href={useGoogleSheetsStore.getState().spreadsheetUrl || getMasterGoogleSheetUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer border border-emerald-400/40"
+                title="Mở Bảng Tính Google Sheets Dữ Liệu Học Viên & Khảo Thí Tập Trung (Chỉ Chủ Sở Hữu & Giáo Viên)"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+                <span>Google Sheets Quản Trị</span>
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-200" />
+              </a>
+
               <button
                 onClick={onSwitchToTeacherView}
                 className="px-3.5 py-2 bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer border border-emerald-500/30"

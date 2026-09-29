@@ -22,11 +22,16 @@ import {
   ChevronRight,
   Flame,
   FileCheck,
-  Database
+  Database,
+  ExternalLink,
+  RefreshCw,
+  Trophy
 } from 'lucide-react';
 import { useAuthStore } from '../utils/userStore';
 import { loadUserStats } from '../utils/storage';
 import { useUserProgressStore, CURRICULUM_LESSONS } from '../utils/userProgressStore';
+import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { GoogleSheetsBackupModal } from './GoogleSheetsBackupModal';
 import { soundManager } from '../utils/audio';
 import { MOSSubject } from '../types/mos';
 
@@ -165,6 +170,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [quizModalOpen, setQuizModalOpen] = useState(false);
   const [quickQuizScore, setQuickQuizScore] = useState(85);
 
+  // Google Sheets Sync State
+  const { 
+    isConnected: isSheetsConnected, 
+    isConnecting: isSheetsConnecting,
+    connect: connectSheets, 
+    backupLearningProgress, 
+    spreadsheetUrl 
+  } = useGoogleSheetsStore();
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ message: string; type: 'success' | 'error'; url?: string } | null>(null);
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+
   const displayName = fullName || user.fullName || user.name || 'Học viên';
   const roleLabel = role === 'admin' 
     ? 'Quản trị viên' 
@@ -217,6 +234,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
     sub => getSubjectStats(sub as 'word' | 'excel' | 'powerpoint').passed
   ).length;
 
+  const handleSyncToGoogleSheets = async () => {
+    soundManager.playClick();
+    setIsSyncingSheets(true);
+    setSyncFeedback(null);
+
+    try {
+      if (!isSheetsConnected) {
+        const connected = await connectSheets();
+        if (!connected) {
+          throw new Error('Chưa thể kết nối với Google Sheets. Vui lòng cấp quyền trong cửa sổ Google OAuth.');
+        }
+      }
+
+      const wordStats = getProgressStats('word');
+      const excelStats = getProgressStats('excel');
+      const pptStats = getProgressStats('powerpoint');
+      const masterPercentage = getMasterProgressPercentage();
+      const completedLessons = useUserProgressStore.getState().getTotalCompletedLessonsCount();
+
+      const milestonesSummary = `${totalExamsPassed}/3 Môn Đạt Chuẩn MOS (Word: ${wordStats.completionPercentage}%, Excel: ${excelStats.completionPercentage}%, PPT: ${pptStats.completionPercentage}%)`;
+
+      const success = await backupLearningProgress({
+        uid: user.id || 'current-user',
+        name: displayName,
+        email: user.email || 'hocvien@mosmaster.edu.vn',
+        masterPct: masterPercentage,
+        wordPct: wordStats.completionPercentage,
+        excelPct: excelStats.completionPercentage,
+        pptPct: pptStats.completionPercentage,
+        totalLessonsCompleted: completedLessons,
+        streakDays: stats.streakDays || 1,
+        passedCount: totalExamsPassed,
+        milestonesSummary,
+      });
+
+      if (success) {
+        soundManager.playCorrect();
+        setSyncFeedback({
+          message: 'Đã xuất thành công các cột mốc học tập và tiến độ lên Google Sheets!',
+          type: 'success',
+          url: useGoogleSheetsStore.getState().spreadsheetUrl || undefined,
+        });
+      } else {
+        throw new Error('Ghi dữ liệu lên Google Sheets thất bại.');
+      }
+    } catch (err: any) {
+      soundManager.playWrong();
+      setSyncFeedback({
+        message: err.message || 'Lỗi khi đồng bộ lên Google Sheets.',
+        type: 'error',
+      });
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
+
   return (
     <div className="space-y-8 pb-12">
       {/* Hero Welcome & MOS Certiport Benchmark Header */}
@@ -254,6 +327,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>Chứng chỉ đã đạt: <strong className="text-white">{totalExamsPassed}/3 Môn</strong></span>
               </div>
+              <button
+                onClick={() => {
+                  soundManager.playClick();
+                  if (onSelectTab) {
+                    onSelectTab('leaderboard');
+                  } else {
+                    navigate('/?tab=leaderboard');
+                  }
+                }}
+                className="flex items-center gap-2 bg-gradient-to-r from-amber-500/25 to-yellow-500/20 hover:from-amber-500/35 hover:to-yellow-500/30 text-amber-300 hover:text-amber-200 px-3 py-1.5 rounded-lg backdrop-blur-xs border border-amber-400/40 transition-all cursor-pointer font-bold shadow-xs active:scale-95"
+                title="Xem Bảng Xếp Hạng Tiến Độ Học Tập Toàn Hệ Thống"
+              >
+                <Trophy className="w-4 h-4 text-amber-400" />
+                <span>Bảng Xếp Hạng</span>
+              </button>
             </div>
           </div>
 
@@ -296,9 +384,77 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="mt-3 text-[11px] text-slate-400 text-center">
               Chuẩn Certiport: <strong className="text-white">≥ 700 / 1000 điểm</strong> để cấp bằng
             </div>
+
+            {/* Sync to Google Sheets Button - ONLY for Teachers and Owner/Admin */}
+            {(role === 'admin' || role === 'teacher') && (
+              <div className="mt-4 pt-3.5 border-t border-white/15 space-y-2">
+                <button
+                  onClick={handleSyncToGoogleSheets}
+                  disabled={isSyncingSheets || isSheetsConnecting}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                  title="Xuất tiến độ học tập và cột mốc MOS Master ra Google Sheets để lưu trữ bên ngoài (Chỉ Giáo Viên & Chủ Sở Hữu)"
+                >
+                  <FileSpreadsheet className={`w-4 h-4 ${isSyncingSheets ? 'animate-bounce' : 'text-emerald-100'}`} />
+                  <span>{isSyncingSheets ? 'Đang xuất sang Google Sheets...' : 'Sync to Google Sheets'}</span>
+                </button>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-300 px-1">
+                  <span className="text-emerald-300 font-semibold flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    Quyền Quản Trị / GV
+                  </span>
+                  <button
+                    onClick={() => setIsSheetsModalOpen(true)}
+                    className="text-emerald-300 hover:text-emerald-200 underline cursor-pointer"
+                  >
+                    Cấu hình sao lưu
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Sync Feedback Toast / Banner - ONLY for Teachers and Owner/Admin */}
+      {syncFeedback && (role === 'admin' || role === 'teacher') && (
+        <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-xs font-medium animate-in fade-in slide-in-from-top-2 shadow-sm ${
+          syncFeedback.type === 'success' 
+            ? 'bg-emerald-50 text-emerald-950 border-emerald-300' 
+            : 'bg-rose-50 text-rose-950 border-rose-300'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {syncFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <HelpCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <div>
+              <span className="font-bold block sm:inline">{syncFeedback.type === 'success' ? 'Đã hoàn tất sao lưu: ' : 'Lỗi đồng bộ: '}</span>
+              <span>{syncFeedback.message}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {syncFeedback.url && (
+              <a
+                href={syncFeedback.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-bold text-emerald-800 bg-white px-3 py-1.5 rounded-xl border border-emerald-300 hover:bg-emerald-100 shadow-2xs transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Mở Google Sheet</span>
+              </a>
+            )}
+            <button 
+              onClick={() => setSyncFeedback(null)}
+              className="text-slate-400 hover:text-slate-600 font-bold p-1 rounded-lg hover:bg-slate-200/50 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Section Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">

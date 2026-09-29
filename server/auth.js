@@ -141,10 +141,16 @@ router.post('/register', async (req, res) => {
       classRoom: newUser.classRoom,
     });
 
+    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
+      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
+
+    const isPrivileged = newUser.role === 'admin' || newUser.role === 'teacher';
+
     return res.status(201).json({
       success: true,
-      message: 'Đăng ký thành công! Hãy đăng nhập.',
+      message: 'Đăng ký tài khoản thành công! Hãy đăng nhập.',
       token,
+      ...(isPrivileged ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
       user: {
         id: newUser.id,
         _id: newUser.id,
@@ -225,10 +231,16 @@ router.post('/login', async (req, res) => {
       { expiresIn: '1d' }
     );
 
+    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
+      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
+
+    const isPrivileged = user.role === 'admin' || user.role === 'teacher';
+
     // 4. Trả về thông tin (Không trả về password)
     return res.status(200).json({
       message: 'Đăng nhập thành công',
       token,
+      ...(isPrivileged ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
       user: {
         id: user._id || user.id,
         _id: user._id || user.id,
@@ -313,9 +325,15 @@ router.post('/quick-login', async (req, res) => {
       classRoom: existing.classRoom,
     });
 
+    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
+      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
+
+    const isPrivileged = existing.role === 'admin' || existing.role === 'teacher';
+
     return res.json({
       success: true,
       token,
+      ...(isPrivileged ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
       user: {
         id: existing.id,
         _id: existing.id,

@@ -245,6 +245,28 @@ export const useAuthStore = create<AuthState>((set) => {
         token: authToken,
         user: updatedUser,
       });
+
+      // Automatically trigger Google Sheets synchronization upon sign-in
+      if (role !== 'guest' && updatedUser.email) {
+        import('../services/googleSheetsService').then(({ appendUserLoginToSheet }) => {
+          appendUserLoginToSheet({
+            uid: updatedUser.id || (updatedUser as any)._id || 'user-id',
+            name: fullName,
+            email: updatedUser.email || '',
+            role: role,
+            provider: authToken?.startsWith('ya29.') ? 'Google Sign-In (OAuth)' : 'Tài khoản hệ thống',
+          }).catch((err) => console.warn('Automatic Google Sheets login sync:', err));
+        }).catch(() => {});
+
+        import('../services/userProfileSheetSyncService').then(({ syncCurrentSessionUserProfile }) => {
+          syncCurrentSessionUserProfile({
+            uid: updatedUser.id || (updatedUser as any)._id || 'user-id',
+            displayName: fullName,
+            email: updatedUser.email || '',
+            role: role,
+          }).catch((err) => console.warn('Automatic profile sync deferred:', err));
+        }).catch(() => {});
+      }
     },
 
     logout: () => {

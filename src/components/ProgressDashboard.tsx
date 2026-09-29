@@ -19,6 +19,8 @@ import {
 } from 'recharts';
 import { useUserProgressStore, MOSSubjectTrack, CURRICULUM_LESSONS } from '../utils/userProgressStore';
 import { useAuthStore } from '../utils/userStore';
+import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { GoogleSheetsBackupModal } from './GoogleSheetsBackupModal';
 import { 
   BarChart3, 
   Award, 
@@ -32,10 +34,14 @@ import {
   RefreshCw,
   Clock,
   Layers,
-  ShieldCheck
+  ShieldCheck,
+  ExternalLink
 } from 'lucide-react';
 
 export const ProgressDashboard: React.FC = () => {
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = React.useState(false);
+  const { isConnected: isSheetsConnected, spreadsheetUrl } = useGoogleSheetsStore();
+
   const { 
     word, 
     excel, 
@@ -137,8 +143,34 @@ export const ProgressDashboard: React.FC = () => {
             </p>
           </div>
 
-          {/* Sync Trigger button */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Sync Trigger button - ONLY for Teachers and Owner/Admin */}
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            {(role === 'admin' || role === 'teacher') && (
+              <>
+                <button
+                  onClick={() => setIsSheetsModalOpen(true)}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Quản trị Bảng Tính Google Sheets (Chỉ Giáo viên & Chủ sở hữu)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isSheetsConnected ? 'Google Sheets (Quản Trị)' : 'Sao Lưu Google Sheets'}</span>
+                </button>
+
+                {spreadsheetUrl && (
+                  <a
+                    href={spreadsheetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                    title="Mở bảng tính Google Sheets trong tab mới (Chỉ dành cho GV / Chủ sở hữu)"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden sm:inline">Mở Sheet</span>
+                  </a>
+                )}
+              </>
+            )}
+
             <button
               onClick={() => syncWithFirestore()}
               className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
@@ -404,6 +436,12 @@ export const ProgressDashboard: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Google Sheets Backup & Synchronization Modal */}
+      <GoogleSheetsBackupModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+      />
     </div>
   );
 };

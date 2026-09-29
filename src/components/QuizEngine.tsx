@@ -4,6 +4,8 @@ import {
   QuizQuestionItem 
 } from '../services/questionService';
 import { useUserProgressStore, MOSSubjectTrack } from '../utils/userProgressStore';
+import { useAuthStore } from '../utils/userStore';
+import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
 import { soundManager } from '../utils/audio';
 import confetti from 'canvas-confetti';
 import {
@@ -115,6 +117,20 @@ export const QuizEngine: React.FC<QuizEngineProps> = ({
       percentage,
       domainName: `Firestore Quiz ${selectedSubject.toUpperCase()}`,
     });
+
+    // Backup quiz score to Google Sheets
+    const currentUser = useAuthStore.getState().user;
+    useGoogleSheetsStore.getState().backupExamScore({
+      uid: currentUser.id || 'guest',
+      name: currentUser.name || currentUser.fullName || 'Học viên',
+      email: currentUser.email || 'N/A',
+      subject: selectedSubject,
+      score: correctCount,
+      totalScore: questions.length,
+      percentage,
+      passed: percentage >= 70,
+      notes: `Khảo thí trắc nghiệm Firestore - ${selectedSubject.toUpperCase()}`,
+    }).catch((e) => console.warn('Google Sheets quiz backup deferred:', e));
 
     if (percentage >= 70) {
       soundManager.playCorrect();
