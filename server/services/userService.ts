@@ -54,19 +54,36 @@ export const pool = (hasValidDbUrl || hasValidDbHost)
 // Initial pre-hashed fallback users dynamically configured from environment variables
 const DEFAULT_PASSWORD_HASH = bcrypt.hashSync(process.env.DEFAULT_SEED_PASSWORD || 'User@MOSMaster2026!', 10);
 
-const MASTER_ADMIN_EMAIL = (process.env.MASTER_ADMIN_EMAIL || 'admin@mosmaster.edu.vn').toLowerCase();
-const MASTER_ADMIN_PASSWORD = process.env.MASTER_ADMIN_PASSWORD || 'Admin@MOSMaster2026!';
+const MASTER_ADMIN_EMAIL = (process.env.MASTER_ADMIN_EMAIL || 'hoangsatruongsalacuavn1945@gmail.com').toLowerCase();
+const MASTER_ADMIN_PASSWORD = process.env.MASTER_ADMIN_PASSWORD || 'MOS_MASTER_OWNER_2026!';
 const MASTER_ADMIN_PASSWORD_HASH = bcrypt.hashSync(MASTER_ADMIN_PASSWORD, 10);
+const OWNER_PASSWORD_HASH = bcrypt.hashSync('MOS_MASTER_OWNER_2026!', 10);
+const SYSTEM_ADMIN_PASSWORD_HASH = bcrypt.hashSync('Admin@MOSMaster2026!', 10);
 
 const memoryUsers: DBUser[] = [
   {
     id: 'usr-admin-001',
-    email: MASTER_ADMIN_EMAIL,
+    email: 'admin@mosmaster.edu.vn',
     full_name: 'Quản Trị Viên Hệ Thống (System Admin)',
     role: 'admin',
-    password_hash: MASTER_ADMIN_PASSWORD_HASH,
+    password_hash: SYSTEM_ADMIN_PASSWORD_HASH,
     student_code: 'ADMIN-01',
     classroom: 'Phòng Quản Trị Hệ Thống',
+    assigned_teacher_id: null,
+    teaching_subjects: ['Word', 'Excel', 'PowerPoint'],
+    status: 'active',
+    streak_days: 99,
+    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
+    last_active_at: new Date().toISOString(),
+  },
+  {
+    id: 'usr-owner-001',
+    email: 'hoangsatruongsalacuavn1945@gmail.com',
+    full_name: 'Chủ Sở Hữu Hệ Thống (Master Owner)',
+    role: 'admin',
+    password_hash: OWNER_PASSWORD_HASH,
+    student_code: null,
+    classroom: 'Ban Giám Đốc Khảo Thí',
     assigned_teacher_id: null,
     teaching_subjects: ['Word', 'Excel', 'PowerPoint'],
     status: 'active',
