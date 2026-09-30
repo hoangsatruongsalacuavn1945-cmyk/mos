@@ -168,7 +168,7 @@ export function updateTeacher(teacherId: string, updates: Partial<TeacherProfile
 // Initial state loader: defaults to 'guest' role
 const getInitialAuthState = () => {
   const token = typeof window !== 'undefined' 
-    ? (localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem('mos_jwt_token') || '') 
+    ? (localStorage.getItem(AUTH_TOKEN_KEY) || '') 
     : '';
 
   try {

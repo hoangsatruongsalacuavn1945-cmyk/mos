@@ -48,10 +48,11 @@ export const UserManagement: React.FC = () => {
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Create Teacher Modal States
+  const generateInitialSecurePass = () => 'Mos@' + Math.random().toString(36).substring(2, 7).toUpperCase() + Math.floor(10 + Math.random() * 90);
   const [isCreateTeacherOpen, setIsCreateTeacherOpen] = useState(false);
   const [teacherFullName, setTeacherFullName] = useState('');
   const [teacherEmail, setTeacherEmail] = useState('');
-  const [teacherPassword, setTeacherPassword] = useState('123456');
+  const [teacherPassword, setTeacherPassword] = useState(generateInitialSecurePass());
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>(['Excel']);
   const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
 
@@ -61,7 +62,7 @@ export const UserManagement: React.FC = () => {
   };
 
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('accessToken') || currentUser.token || '';
+    const token = localStorage.getItem('mos_auth_token_jwt') || '';
     return {
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -96,7 +97,7 @@ export const UserManagement: React.FC = () => {
       setIsCreateTeacherOpen(false);
       setTeacherFullName('');
       setTeacherEmail('');
-      setTeacherPassword('123456');
+      setTeacherPassword(generateInitialSecurePass());
       setSelectedSubjects(['Excel']);
       loadUsers();
     } catch (err: any) {

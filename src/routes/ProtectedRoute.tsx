@@ -11,7 +11,7 @@ interface Props {
  */
 function getVerifiedTokenRole(): string | null {
   try {
-    const token = localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('mos_jwt_token');
+    const token = localStorage.getItem('mos_auth_token_jwt');
     if (!token || typeof token !== 'string') return null;
 
     const parts = token.split('.');

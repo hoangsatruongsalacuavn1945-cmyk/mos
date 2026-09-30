@@ -10,7 +10,6 @@ export interface IUser {
   fullName?: string;
   email: string;
   role: UserRole;
-  token?: string; // JWT Token cho Teacher/Admin
   studentCode?: string;
   classRoom?: string;
   targetSubject?: 'word' | 'excel' | 'powerpoint' | 'all';

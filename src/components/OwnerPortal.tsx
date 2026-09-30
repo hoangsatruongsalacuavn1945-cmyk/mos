@@ -116,7 +116,7 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
   const [subject, setSubject] = useState<'word' | 'excel' | 'powerpoint' | 'all'>('excel');
   const [title, setTitle] = useState('ThS. Giảng Viên Khảo Thí MOS');
   const [department, setDepartment] = useState('Bộ môn Tin học Ứng dụng & Khảo thí');
-  const [phone, setPhone] = useState('0988.123.456');
+  const [phone, setPhone] = useState('1900.0000');
   const [avatarBg, setAvatarBg] = useState('bg-blue-600');
 
   // Notification State
@@ -130,7 +130,7 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
 
   // Helper to get authenticated headers
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('mos_auth_token_jwt') || currentUser.token || '';
+    const token = localStorage.getItem('mos_auth_token_jwt') || '';
     return {
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {})

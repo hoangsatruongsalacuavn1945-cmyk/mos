@@ -1,0 +1,201 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "MOS Master Exam Platform API",
+    "description": "Production-grade RESTful API specification for the MOS Master Exam Preparation, Anti-Cheat, and Authoritative Grading Platform.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Current Server API Root"
+    },
+    {
+      "url": "/api/v1",
+      "description": "Versioned v1 API Root"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": { "type": "string", "example": "BadRequest" },
+          "message": { "type": "string", "example": "Yêu cầu không hợp lệ." },
+          "statusCode": { "type": "integer", "example": 400 },
+          "requestId": { "type": "string", "example": "err-1790775990234-a1b2c3d4" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "healthy" },
+          "version": { "type": "string", "example": "1.0.0" },
+          "uptime": { "type": "string", "example": "3600s" },
+          "services": { "type": "object" }
+        }
+      },
+      "ExamStartRequest": {
+        "type": "object",
+        "properties": {
+          "subject": { "type": "string", "enum": ["word", "excel", "powerpoint", "all"] },
+          "studentId": { "type": "string" },
+          "studentName": { "type": "string" },
+          "studentCode": { "type": "string" }
+        }
+      },
+      "ExamSubmitRequest": {
+        "type": "object",
+        "required": ["sessionId", "userAnswers"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "userAnswers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "timeSpentSeconds": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Check system health and service dependencies",
+        "responses": {
+          "200": {
+            "description": "System is healthy",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "summary": "Register a new student account",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password", "fullName"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string", "minLength": 8 },
+                  "fullName": { "type": "string" },
+                  "teacherId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "User created successfully" },
+          "400": { "$ref": "#/components/schemas/ErrorResponse" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Authenticate user and receive JWT",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Login successful" },
+          "400": { "$ref": "#/components/schemas/ErrorResponse" },
+          "403": { "$ref": "#/components/schemas/ErrorResponse" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "Revoke active JWT token",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Token revoked successfully" }
+        }
+      }
+    },
+    "/exam/start": {
+      "post": {
+        "summary": "Start an authoritative exam session with sanitized questions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExamStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Exam session created" },
+          "429": { "$ref": "#/components/schemas/ErrorResponse" }
+        }
+      }
+    },
+    "/exam/submit": {
+      "post": {
+        "summary": "Submit exam session with authoritative server-side evaluation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExamSubmitRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Exam graded with Certiport MOS score" },
+          "400": { "$ref": "#/components/schemas/ErrorResponse" }
+        }
+      }
+    },
+    "/gemini/chat": {
+      "post": {
+        "summary": "Interact with AI MOS Tutor",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["messages"],
+                "properties": {
+                  "messages": { "type": "array", "items": { "type": "object" } },
+                  "subject": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "AI Tutor answer returned" },
+          "429": { "$ref": "#/components/schemas/ErrorResponse" }
+        }
+      }
+    }
+  }
+}

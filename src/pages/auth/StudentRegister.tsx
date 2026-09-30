@@ -28,6 +28,7 @@ export default function StudentRegister() {
     fullName: '',
     email: '',
     password: '',
+    confirmPassword: '',
     teacherId: ''
   });
 
@@ -70,11 +71,42 @@ export default function StudentRegister() {
       return;
     }
 
+    // Email format validation
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(formData.email.trim())) {
+      setError('Định dạng email không hợp lệ (ví dụ: student@mosmaster.edu.vn).');
+      setLoading(false);
+      soundManager.playWrong();
+      return;
+    }
+
+    // Password strength validation (min 8 chars, uppercase, lowercase, number)
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(formData.password)) {
+      setError('Mật khẩu phải chứa ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường và chữ số.');
+      setLoading(false);
+      soundManager.playWrong();
+      return;
+    }
+
+    // Password confirmation match
+    if (formData.password !== formData.confirmPassword) {
+      setError('Mật khẩu nhập lại không khớp với mật khẩu đã nhập!');
+      setLoading(false);
+      soundManager.playWrong();
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          email: formData.email,
+          password: formData.password,
+          teacherId: formData.teacherId,
+        }),
       });
 
       const data = await response.json();
@@ -186,18 +218,35 @@ export default function StudentRegister() {
           </div>
 
           <div>
-            <label className="block font-semibold text-slate-300 mb-1">Mật khẩu (Tối thiểu 6 ký tự)</label>
+            <label className="block font-semibold text-slate-300 mb-1">Mật khẩu (Tối thiểu 8 ký tự, gồm Hoa, Thường & Số)</label>
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <input 
                 type="password" 
                 name="password" 
                 required 
-                minLength={6}
+                minLength={8}
                 placeholder="••••••••"
                 className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500 transition-colors"
                 onChange={handleChange}
                 value={formData.password}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-300 mb-1">Nhập lại mật khẩu</label>
+            <div className="relative">
+              <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <input 
+                type="password" 
+                name="confirmPassword" 
+                required 
+                minLength={8}
+                placeholder="••••••••"
+                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500 transition-colors"
+                onChange={handleChange}
+                value={formData.confirmPassword}
               />
             </div>
           </div>

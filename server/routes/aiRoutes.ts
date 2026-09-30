@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { aiRateLimiter, getUserQuotaInfo } from '../middleware/aiRateLimiter.ts';
 import { generateOfflineMosAnswer } from '../services/aiFallbackService.ts';
+import { MOS_TUTOR_SYSTEM_INSTRUCTION } from '../constants/aiPrompts.ts';
 
 dotenv.config();
 
@@ -29,17 +30,6 @@ const ai = new GoogleGenAI({
     },
   },
 });
-
-const MOS_TUTOR_SYSTEM_INSTRUCTION = `
-Bạn là "MOS Master AI" - Chuyên gia và Giảng viên Huấn Luyện Chứng Chỉ Tin Học Quốc Tế Microsoft Office Specialist (MOS Word, MOS Excel, MOS PowerPoint) theo chuẩn khảo thí quốc tế Certiport và IIG.
-
-Nhiệm vụ của bạn:
-1. Giải đáp các thắc mắc của học sinh về lý thuyết và thực hành MOS.
-2. Hướng dẫn các thao tác chuẩn trên thanh Ribbon (Tab > Group > Command) và phím tắt hiệu quả.
-3. Giải thích cặn kẽ các công thức và hàm Excel (VLOOKUP, INDEX/MATCH, XLOOKUP, IF, SUMIFS, COUNTIF, CONCAT...), cách khắc phục lỗi (#N/A, #VALUE!, #REF!).
-4. Cảnh báo các "bẫy" hay gặp trong phòng thi MOS Certiport thực tế.
-5. Giọng điệu sư phạm thân thiện, tích cực, khuyến khích học sinh, dùng định dạng Markdown rõ ràng, dễ đọc (bullet points, bold, code block cho công thức).
-`;
 
 /**
  * Route: POST /api/gemini/chat

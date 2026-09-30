@@ -410,21 +410,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span className="px-1.5 py-0.5 text-[10px] bg-emerald-100 text-emerald-800 font-bold rounded">Portal</span>
           </button>
 
-          <button
-            onClick={() => {
-              soundManager.playClick();
-              setActiveTab('owner');
-            }}
-            className={`flex items-center gap-1.5 pb-3 px-3 text-sm font-semibold border-b-2 transition-all ${
-              activeTab === 'owner'
-                ? 'border-amber-500 text-amber-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            <Crown className="w-4 h-4 text-amber-500" />
-            <span>Chủ Sở Hữu</span>
-            <span className="px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-900 font-extrabold rounded">Owner Root</span>
-          </button>
+          {/* Owner Root Tab (Admin Exclusive - Hidden from non-admin users) */}
+          {(currentUser.role === 'admin' || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('role') === 'admin')) && (
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setActiveTab('owner');
+              }}
+              className={`flex items-center gap-1.5 pb-3 px-3 text-sm font-semibold border-b-2 transition-all ${
+                activeTab === 'owner'
+                  ? 'border-amber-500 text-amber-600 font-bold'
+                  : 'border-transparent text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-amber-500" />
+              <span>Chủ Sở Hữu</span>
+              <span className="px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-900 font-extrabold rounded">Owner Root</span>
+            </button>
+          )}
         </div>
 
         <div className="p-6">

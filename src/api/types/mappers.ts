@@ -39,13 +39,15 @@ export function mapDbUserToApiUser(dbUser: Partial<DbUserProfile> & Record<strin
  * Transforms ApiUser into Frontend IUser representation
  */
 export function mapApiUserToFrontendUser(apiUser: ApiUser, token?: string): IUser {
+  if (token && typeof window !== 'undefined') {
+    localStorage.setItem('mos_auth_token_jwt', token);
+  }
   return {
     id: apiUser.id,
     name: apiUser.fullName || apiUser.name,
     fullName: apiUser.fullName,
     email: apiUser.email,
     role: apiUser.role,
-    token: token,
     studentCode: apiUser.studentCode || undefined,
     classRoom: apiUser.classRoom || undefined,
     targetSubject: (apiUser.targetSubject as any) || 'all',
