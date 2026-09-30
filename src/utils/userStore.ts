@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import { UserProfile, TeacherProfile, Submission, IUser, UserRole } from '../types/user';
 
+export const AUTH_TOKEN_KEY = 'mos_auth_token_jwt';
+
+export function getAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? (localStorage.getItem(AUTH_TOKEN_KEY) || '') : '';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export const DEFAULT_GUEST: IUser = {
   name: 'Khách',
   email: 'guest@student.edu.vn',
@@ -15,7 +26,7 @@ export const DEFAULT_TEACHERS: TeacherProfile[] = [
     subject: 'word',
     title: 'Trưởng Bộ Môn MOS Word (MO-100)',
     department: 'Khoa Tin học Ứng dụng & Khảo thí Quốc tế',
-    phone: '0912.345.678',
+    phone: '1900.6868 (Ext: 101)',
     avatarBg: 'bg-blue-600',
   },
   {
@@ -25,7 +36,7 @@ export const DEFAULT_TEACHERS: TeacherProfile[] = [
     subject: 'excel',
     title: 'Chuyên Gia Huấn Luyện MOS Excel (MO-200)',
     department: 'Bộ môn Phân tích Dữ liệu & Bảng tính',
-    phone: '0988.765.432',
+    phone: '1900.6868 (Ext: 102)',
     avatarBg: 'bg-emerald-600',
   },
   {
@@ -35,7 +46,7 @@ export const DEFAULT_TEACHERS: TeacherProfile[] = [
     subject: 'powerpoint',
     title: 'Giảng Viên Chuyên Sâu MOS PowerPoint (MO-300)',
     department: 'Bộ môn Thiết kế Đa phương tiện & Thuyết trình',
-    phone: '0933.112.233',
+    phone: '1900.6868 (Ext: 103)',
     avatarBg: 'bg-orange-600',
   },
   {
@@ -45,7 +56,7 @@ export const DEFAULT_TEACHERS: TeacherProfile[] = [
     subject: 'all',
     title: 'Giám Đốc Trung Tâm Khảo Thí MOS Master',
     department: 'Hội đồng Khảo thí Certiport Việt Nam',
-    phone: '0903.999.888',
+    phone: '1900.6868 (Ext: 104)',
     avatarBg: 'bg-indigo-700',
   },
 ];
@@ -56,13 +67,13 @@ const TEACHERS_STORAGE_KEY = 'mos_teachers_list_v2';
 
 export const OWNER_PROFILE: UserProfile = {
   id: 'owner-master-root',
-  name: 'Chủ Sở Hữu Hệ Thống (Master Owner)',
-  email: 'hoangsatruongsalacuavn1945@gmail.com',
+  name: 'Quản Trị Viên Hệ Thống (Master Admin)',
+  email: 'admin@mosmaster.edu.vn',
   role: 'admin',
   targetSubject: 'all',
   assignedTeacherId: '',
   assignedTeacherName: 'Toàn Quyền Quản Trị Hệ Thống',
-  assignedTeacherEmail: 'hoangsatruongsalacuavn1945@gmail.com',
+  assignedTeacherEmail: 'admin@mosmaster.edu.vn',
   createdAt: new Date().toISOString(),
 };
 
@@ -116,9 +127,9 @@ export function addTeacher(teacherData: Omit<TeacherProfile, 'id'>): TeacherProf
   // Sync to backend if possible
   fetch('/api/teachers', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify(newTeacher),
-  }).catch(() => {});
+  }).catch((err) => console.warn('Sync teacher error:', err));
 
   return newTeacher;
 }
@@ -130,7 +141,10 @@ export function deleteTeacher(teacherId: string): boolean {
   saveTeachers(filtered);
 
   // Sync to backend
-  fetch(`/api/teachers/${teacherId}`, { method: 'DELETE' }).catch(() => {});
+  fetch(`/api/teachers/${teacherId}`, { 
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  }).catch((err) => console.warn('Delete teacher error:', err));
   return true;
 }
 
@@ -144,9 +158,9 @@ export function updateTeacher(teacherId: string, updates: Partial<TeacherProfile
   // Sync to backend
   fetch(`/api/teachers/${teacherId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify(teachers[index]),
-  }).catch(() => {});
+  }).catch((err) => console.warn('Update teacher error:', err));
 
   return teachers[index];
 }
@@ -154,7 +168,7 @@ export function updateTeacher(teacherId: string, updates: Partial<TeacherProfile
 // Initial state loader: defaults to 'guest' role
 const getInitialAuthState = () => {
   const token = typeof window !== 'undefined' 
-    ? (localStorage.getItem('mos_auth_token_jwt') || localStorage.getItem('accessToken') || '') 
+    ? (localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem('mos_jwt_token') || '') 
     : '';
 
   try {
@@ -226,13 +240,14 @@ export const useAuthStore = create<AuthState>((set) => {
         role,
         fullName,
         name: fullName,
-        token: authToken,
       };
 
       try {
         if (authToken) {
-          localStorage.setItem('mos_auth_token_jwt', authToken);
-          localStorage.setItem('accessToken', authToken);
+          localStorage.setItem(AUTH_TOKEN_KEY, authToken);
+          // Clean legacy keys
+          localStorage.removeItem('mos_jwt_token');
+          localStorage.removeItem('accessToken');
         }
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
       } catch (e) {
@@ -279,7 +294,8 @@ export const useAuthStore = create<AuthState>((set) => {
       };
 
       try {
-        localStorage.removeItem('mos_auth_token_jwt');
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem('mos_jwt_token');
         localStorage.removeItem('accessToken');
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(guestUser));
       } catch (e) {
@@ -368,7 +384,7 @@ export async function sendSubmissionToTeacher(submission: Omit<Submission, 'id' 
   try {
     const res = await fetch('/api/submissions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(fullSubmission),
     });
     if (res.ok) {
@@ -390,7 +406,9 @@ export async function fetchSubmissions(filter?: { teacherId?: string; studentId?
     if (filter?.studentId) params.append('studentId', filter.studentId);
     if (filter?.subject && filter.subject !== 'all') params.append('subject', filter.subject);
 
-    const res = await fetch(`/api/submissions?${params.toString()}`);
+    const res = await fetch(`/api/submissions?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.submissions)) {
@@ -423,7 +441,7 @@ export async function submitTeacherFeedback(
   try {
     const res = await fetch(`/api/submissions/${submissionId}/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ feedback, rating }),
     });
     if (res.ok) {

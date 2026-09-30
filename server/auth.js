@@ -20,6 +20,29 @@ dotenv.config();
 
 const router = express.Router();
 
+// Rate limiter for authentication actions (15 attempts per 15 mins)
+const authLimiterMap = new Map();
+const authRateLimiter = (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const record = authLimiterMap.get(ip) || { count: 0, resetAt: now + windowMs };
+
+  if (now > record.resetAt) {
+    record.count = 0;
+    record.resetAt = now + windowMs;
+  }
+
+  record.count++;
+  authLimiterMap.set(ip, record);
+
+  if (record.count > 25) {
+    return res.status(429).json({ message: 'Quá nhiều yêu cầu đăng nhập/đăng ký. Vui lòng thử lại sau 15 phút.' });
+  }
+
+  next();
+};
+
 /**
  * Helper: Sign JWT token
  */
@@ -79,7 +102,7 @@ router.get('/teachers', async (req, res) => {
  * POST /api/auth/register
  * Student Registration endpoint with teacher selection
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authRateLimiter, async (req, res) => {
   try {
     const {
       email,
@@ -101,11 +124,15 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ email, mật khẩu và họ tên.' });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ message: 'Định dạng email không hợp lệ.' });
+    }
+
     if (password.length < 6) {
       return res.status(400).json({ message: 'Mật khẩu phải chứa ít nhất 6 ký tự.' });
     }
-
-    const cleanEmail = email.trim().toLowerCase();
 
     // Check if email already exists
     const existing = await User.findOne({ email: cleanEmail });
@@ -126,7 +153,6 @@ router.post('/register', async (req, res) => {
     const newUser = new User({
       fullName: actualName,
       email: cleanEmail,
-      password: hashedPassword,
       password_hash: hashedPassword,
       role: 'student',
       studentCode: studentCode ? studentCode.trim() : `HV-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -136,46 +162,44 @@ router.post('/register', async (req, res) => {
       streakDays: 1,
     });
 
-    await newUser.save();
+    const savedUser = await newUser.save();
 
     auditLogger.logAuthAttempt({
       event: 'REGISTER_SUCCESS',
-      email: newUser.email,
-      role: newUser.role,
-      userId: newUser.id,
+      email: savedUser.email,
+      role: savedUser.role,
+      userId: savedUser.id || savedUser._id,
       ip: req.ip,
     });
 
     const token = generateToken({
-      id: newUser.id,
-      email: newUser.email,
-      role: newUser.role,
-      fullName: newUser.fullName,
-      name: newUser.fullName,
-      studentCode: newUser.studentCode,
-      classRoom: newUser.classRoom,
+      id: savedUser.id || savedUser._id,
+      email: savedUser.email,
+      role: savedUser.role,
+      fullName: savedUser.fullName,
+      name: savedUser.fullName,
+      studentCode: savedUser.studentCode,
+      classRoom: savedUser.classRoom,
     });
 
-    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
-      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
-
-    const isPrivileged = newUser.role === 'admin' || newUser.role === 'teacher';
+    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || '';
+    const isPrivileged = savedUser.role === 'admin' || savedUser.role === 'teacher';
 
     return res.status(201).json({
       success: true,
       message: 'Đăng ký tài khoản thành công! Hãy đăng nhập.',
       token,
-      ...(isPrivileged ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
+      ...(isPrivileged && masterGoogleSheetUrl ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
       user: {
-        id: newUser.id,
-        _id: newUser.id,
-        fullName: newUser.fullName,
-        name: newUser.fullName,
-        email: newUser.email,
-        role: newUser.role,
-        studentCode: newUser.studentCode,
-        classRoom: newUser.classRoom,
-        assignedTeacherId: newUser.assignedTeacherId,
+        id: savedUser.id || savedUser._id,
+        _id: savedUser.id || savedUser._id,
+        fullName: savedUser.fullName,
+        name: savedUser.fullName,
+        email: savedUser.email,
+        role: savedUser.role,
+        studentCode: savedUser.studentCode,
+        classRoom: savedUser.classRoom,
+        assignedTeacherId: savedUser.assignedTeacherId,
       }
     });
 
@@ -189,7 +213,7 @@ router.post('/register', async (req, res) => {
  * POST /api/auth/login
  * Unified Login API for Students, Teachers, and Admin
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -200,27 +224,7 @@ router.post('/login', async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
 
     // 1. Tìm user theo email
-    let user = await User.findOne({ email: cleanEmail });
-    if (!user) {
-      // If logging in with designated admin email, auto-create admin user with bcrypt hash if missing
-      const isDesignatedAdmin = 
-        cleanEmail === 'admin@mosmaster.edu.vn' ||
-        cleanEmail === 'hoangsatruongsalacuavn1945@gmail.com' ||
-        (process.env.MASTER_ADMIN_EMAIL && cleanEmail === process.env.MASTER_ADMIN_EMAIL.toLowerCase());
-
-      if (isDesignatedAdmin) {
-        user = new User({
-          id: 'usr-admin-' + Date.now(),
-          fullName: 'Quản Trị Viên Hệ Thống (Master Owner)',
-          email: cleanEmail,
-          role: 'admin',
-          password_hash: bcrypt.hashSync(process.env.MASTER_ADMIN_PASSWORD || 'MOS_MASTER_OWNER_2026!', 10),
-          status: 'active',
-          streakDays: 99,
-        });
-        await user.save().catch(() => {});
-      }
-    }
+    const user = await User.findOne({ email: cleanEmail });
 
     if (!user) {
       auditLogger.logAuthAttempt({
@@ -246,11 +250,7 @@ router.post('/login', async (req, res) => {
 
     // 2. So sánh mật khẩu an toàn bằng bcrypt (Không có backdoor, không so sánh plaintext S-001, S-002, S-003)
     let isMatch = false;
-    let passwordHash = user.password_hash;
-
-    if (!passwordHash && user.password && user.password.startsWith('$2')) {
-      passwordHash = user.password;
-    }
+    const passwordHash = user.password_hash || (user.password && user.password.startsWith('$2') ? user.password : null);
 
     if (passwordHash) {
       try {
@@ -260,44 +260,19 @@ router.post('/login', async (req, res) => {
       }
     }
 
-    // For admin role accounts, validate against configured master passwords via bcrypt
-    if (!isMatch && user.role === 'admin') {
+    // For admin role, allow validation against environment variable if configured
+    if (!isMatch && user.role === 'admin' && process.env.MASTER_ADMIN_PASSWORD) {
       try {
-        const masterPasswords = [
-          'MOS_MASTER_OWNER_2026!',
-          'Admin@MOSMaster2026!',
-          process.env.MASTER_ADMIN_PASSWORD,
-        ].filter(Boolean);
-
-        for (const candidate of masterPasswords) {
-          const candidateHash = await bcrypt.hash(candidate, 10);
-          if (await bcrypt.compare(password, candidateHash)) {
-            isMatch = true;
-            // Persist the verified password as the user's active bcrypt hash
-            const newSalt = await bcrypt.genSalt(10);
-            user.password_hash = await bcrypt.hash(password, newSalt);
-            user.password = user.password_hash;
-            await user.save().catch(() => {});
-            break;
-          }
+        const envMasterHash = await bcrypt.hash(process.env.MASTER_ADMIN_PASSWORD, 10);
+        if (await bcrypt.compare(password, envMasterHash)) {
+          isMatch = true;
+          // Synchronize user's hash in database
+          const salt = await bcrypt.genSalt(10);
+          user.password_hash = await bcrypt.hash(password, salt);
+          await user.save().catch(() => {});
         }
       } catch (adminErr) {
-        logger.error('[Auth Security] Admin bcrypt check error:', adminErr);
-      }
-    } else if (!isMatch && user.password) {
-      // Automatic security migration: Upgrade any legacy plaintext password to secure bcrypt hash
-      try {
-        const legacyMatch = (password === user.password);
-        if (legacyMatch) {
-          const salt = await bcrypt.genSalt(10);
-          const newHash = await bcrypt.hash(password, salt);
-          user.password_hash = newHash;
-          user.password = newHash;
-          await user.save();
-          isMatch = true;
-        }
-      } catch (migrationErr) {
-        logger.error('[Auth Security] Failed to migrate legacy password:', migrationErr);
+        logger.error('[Auth Security] Admin env password verify error:', adminErr);
       }
     }
 
@@ -407,19 +382,23 @@ router.post('/quick-login', async (req, res) => {
     let existing = await User.findOne({ email: cleanEmail });
 
     if (!existing) {
+      const generatedSalt = await bcrypt.genSalt(10);
+      const generatedHash = await bcrypt.hash(Math.random().toString(36).slice(-8) + Date.now(), generatedSalt);
+
       existing = new User({
         fullName: name || (role === 'teacher' ? 'Giảng Viên MOS' : 'Học Viên'),
         email: cleanEmail,
+        password_hash: generatedHash,
         role,
         studentCode: studentCode || (role === 'student' ? 'K24-CNTT-089' : null),
         classRoom: classRoom || 'Lớp MOS-TinHoc01',
         assignedTeacherId: assignedTeacherId || 'a0000000-0000-0000-0000-000000000002',
       });
-      await existing.save();
+      existing = await existing.save();
     }
 
     const token = generateToken({
-      id: existing.id,
+      id: existing.id || existing._id,
       email: existing.email,
       role: existing.role,
       fullName: existing.fullName,
@@ -427,18 +406,17 @@ router.post('/quick-login', async (req, res) => {
       classRoom: existing.classRoom,
     });
 
-    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
-      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
+    const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || '';
 
     const isPrivileged = existing.role === 'admin' || existing.role === 'teacher';
 
     return res.json({
       success: true,
       token,
-      ...(isPrivileged ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
+      ...(isPrivileged && masterGoogleSheetUrl ? { googleSheetUrl: masterGoogleSheetUrl } : {}),
       user: {
-        id: existing.id,
-        _id: existing.id,
+        id: existing.id || existing._id,
+        _id: existing.id || existing._id,
         fullName: existing.fullName,
         name: existing.fullName,
         email: existing.email,

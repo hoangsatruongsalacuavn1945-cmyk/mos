@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FileText, 
@@ -31,6 +31,7 @@ import { useAuthStore } from '../utils/userStore';
 import { loadUserStats } from '../utils/storage';
 import { useUserProgressStore, CURRICULUM_LESSONS } from '../utils/userProgressStore';
 import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { getStoredGoogleToken } from '../services/googleSheetsService';
 import { GoogleSheetsBackupModal } from './GoogleSheetsBackupModal';
 import { soundManager } from '../utils/audio';
 import { MOSSubject } from '../types/mos';
@@ -154,7 +155,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user, fullName, role } = useAuthStore();
-  const stats = loadUserStats();
+  const stats = useMemo(() => loadUserStats(), []);
 
   // Connect UserProgressStore (Zustand + Firestore)
   const { 
@@ -167,8 +168,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   } = useUserProgressStore();
 
   const [activePreview, setActivePreview] = useState<'word' | 'excel' | 'powerpoint'>('excel');
-  const [quizModalOpen, setQuizModalOpen] = useState(false);
-  const [quickQuizScore, setQuickQuizScore] = useState(85);
 
   // Google Sheets Sync State
   const { 
@@ -188,7 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     : role === 'teacher' 
     ? 'Giảng viên' 
     : role === 'student' 
-    ? 'Học viên chính thức' 
+    ? 'Học viên' 
     : 'Khách trải nghiệm';
 
   // Calculate subject progress from exam history
@@ -230,9 +229,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  const totalExamsPassed = ['word', 'excel', 'powerpoint'].filter(
-    sub => getSubjectStats(sub as 'word' | 'excel' | 'powerpoint').passed
-  ).length;
+  const totalExamsPassed = useMemo(() => {
+    return ['word', 'excel', 'powerpoint'].filter(
+      sub => getSubjectStats(sub as 'word' | 'excel' | 'powerpoint').passed
+    ).length;
+  }, [stats]);
 
   const handleSyncToGoogleSheets = async () => {
     soundManager.playClick();
@@ -240,7 +241,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setSyncFeedback(null);
 
     try {
-      if (!isSheetsConnected) {
+      const activeGoogleToken = getStoredGoogleToken();
+      if (!isSheetsConnected || !activeGoogleToken) {
         const connected = await connectSheets();
         if (!connected) {
           throw new Error('Chưa thể kết nối với Google Sheets. Vui lòng cấp quyền trong cửa sổ Google OAuth.');
@@ -725,11 +727,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </p>
                 </div>
                 <button
-                  onClick={() => setQuizModalOpen(true)}
+                  onClick={() => {
+                    if (onSelectSubject) onSelectSubject(activeItem.id);
+                    if (onSelectTab) onSelectTab('theory');
+                    else navigate('/?tab=theory');
+                  }}
                   className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition-colors flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Ghi Nhận Điểm Quiz Môn Này</span>
+                  <span>Luyện Tập Quiz Môn Này</span>
                 </button>
               </div>
 
@@ -906,76 +912,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Quick Quiz Score Recorder Modal */}
-      {quizModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-600" />
-                Ghi Nhận Kết Quả Quiz {activePreview.toUpperCase()}
-              </h3>
-              <button 
-                onClick={() => setQuizModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Nhập tỷ lệ điểm số bài trắc nghiệm vừa hoàn thành cho môn <strong>{activePreview.toUpperCase()}</strong>. Điểm sẽ được lưu trữ vào <code>UserProgressStore</code> và đồng bộ lên Firebase.
-            </p>
-
-            <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>Tỷ lệ trả lời đúng</span>
-                <span className="text-base text-indigo-600 font-extrabold">{quickQuizScore}%</span>
-              </div>
-              <input 
-                type="range" 
-                min="30" 
-                max="100" 
-                value={quickQuizScore} 
-                onChange={(e) => setQuickQuizScore(Number(e.target.value))}
-                className="w-full accent-indigo-600 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-slate-400 font-semibold">
-                <span>30%</span>
-                <span>Chuẩn MOS: ≥ 70%</span>
-                <span>100%</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setQuizModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await recordQuizScore(activePreview, {
-                    score: Math.round((quickQuizScore / 100) * 20),
-                    total: 20,
-                    percentage: quickQuizScore,
-                    domainName: `Chuyên đề ${activePreview.toUpperCase()}`,
-                  });
-                  soundManager.playCorrect();
-                  setQuizModalOpen(false);
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md cursor-pointer transition-colors"
-              >
-                Lưu Điểm Quiz
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

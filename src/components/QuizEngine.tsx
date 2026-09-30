@@ -20,7 +20,6 @@ import {
   BookOpen,
   Sparkles,
   Database,
-  ChevronRight,
   ShieldCheck,
   FileSpreadsheet,
   FileText,
@@ -101,56 +100,63 @@ export const QuizEngine: React.FC<QuizEngineProps> = ({
     soundManager.playClick();
     setIsSubmitted(true);
 
-    let correctCount = 0;
-    questions.forEach((q) => {
-      if (userAnswers[q.id] === q.correctAnswer) {
-        correctCount += 1;
+    try {
+      const totalQ = questions.length || 1;
+      let correctCount = 0;
+      questions.forEach((q) => {
+        if (userAnswers[q.id] === q.correctAnswer) {
+          correctCount += 1;
+        }
+      });
+
+      const percentage = Math.round((correctCount / totalQ) * 100);
+
+      // Save to UserProgressStore and sync to Firestore
+      await recordQuizScore(selectedSubject, {
+        score: correctCount,
+        total: questions.length,
+        percentage,
+        domainName: `Firestore Quiz ${selectedSubject.toUpperCase()}`,
+      });
+
+      // Backup quiz score to Google Sheets
+      const currentUser = useAuthStore.getState().user;
+      useGoogleSheetsStore.getState().backupExamScore({
+        uid: currentUser.id || 'guest',
+        name: currentUser.name || currentUser.fullName || 'Học viên',
+        email: currentUser.email || 'N/A',
+        subject: selectedSubject,
+        score: correctCount,
+        totalScore: questions.length,
+        percentage,
+        passed: percentage >= 70,
+        notes: `Khảo thí trắc nghiệm Firestore - ${selectedSubject.toUpperCase()}`,
+      }).catch((e) => console.warn('Google Sheets quiz backup deferred:', e));
+
+      if (percentage >= 70) {
+        soundManager.playCorrect();
+        if (typeof confetti === 'function') {
+          try {
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 },
+            });
+          } catch {}
+        }
+
+        // Auto mark first lesson as completed as encouragement
+        const defaultLessonId = selectedSubject === 'word' ? 'word-101' : selectedSubject === 'excel' ? 'excel-201' : 'ppt-301';
+        completeLesson(selectedSubject, defaultLessonId).catch(() => {});
+      } else {
+        soundManager.playWrong();
       }
-    });
 
-    const percentage = Math.round((correctCount / questions.length) * 100);
-
-    // Save to UserProgressStore and sync to Firestore
-    await recordQuizScore(selectedSubject, {
-      score: correctCount,
-      total: questions.length,
-      percentage,
-      domainName: `Firestore Quiz ${selectedSubject.toUpperCase()}`,
-    });
-
-    // Backup quiz score to Google Sheets
-    const currentUser = useAuthStore.getState().user;
-    useGoogleSheetsStore.getState().backupExamScore({
-      uid: currentUser.id || 'guest',
-      name: currentUser.name || currentUser.fullName || 'Học viên',
-      email: currentUser.email || 'N/A',
-      subject: selectedSubject,
-      score: correctCount,
-      totalScore: questions.length,
-      percentage,
-      passed: percentage >= 70,
-      notes: `Khảo thí trắc nghiệm Firestore - ${selectedSubject.toUpperCase()}`,
-    }).catch((e) => console.warn('Google Sheets quiz backup deferred:', e));
-
-    if (percentage >= 70) {
-      soundManager.playCorrect();
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-        });
-      } catch {}
-
-      // Auto mark first lesson as completed as encouragement
-      const defaultLessonId = selectedSubject === 'word' ? 'word-101' : selectedSubject === 'excel' ? 'excel-201' : 'ppt-301';
-      completeLesson(selectedSubject, defaultLessonId).catch(() => {});
-    } else {
-      soundManager.playWrong();
-    }
-
-    if (onFinish) {
-      onFinish(correctCount, questions.length, percentage);
+      if (onFinish) {
+        onFinish(correctCount, questions.length, percentage);
+      }
+    } catch (err) {
+      console.error('[QuizEngine] Error in handleSubmit:', err);
     }
   };
 

@@ -29,18 +29,25 @@ export interface AuditLogEntry {
   createdAt?: string;
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.VITE_DATABASE_URL,
-  host: process.env.DB_HOST || process.env.VITE_DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || process.env.VITE_DB_PORT || '5432', 10),
-  database: process.env.DB_NAME || process.env.VITE_DB_NAME || 'mos_master_db',
-  user: process.env.DB_USER || process.env.VITE_DB_USER || 'mos_admin',
-  password: process.env.DB_PASSWORD || process.env.VITE_DB_PASSWORD || '',
-  ssl: (process.env.DB_SSL === 'true' || process.env.VITE_DB_SSL === 'true') ? { rejectUnauthorized: false } : false,
-  max: 5,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 3000,
-});
+const rawDbUrl = process.env.DATABASE_URL || '';
+const hasValidDb = Boolean(
+  rawDbUrl && (rawDbUrl.startsWith('postgres://') || rawDbUrl.startsWith('postgresql://'))
+);
+
+const pool = hasValidDb
+  ? new Pool({
+      connectionString: rawDbUrl,
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '5432', 10),
+      database: process.env.DB_NAME || 'mos_master_db',
+      user: process.env.DB_USER || 'mos_admin',
+      password: process.env.DB_PASSWORD || '',
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 3000,
+    })
+  : null;
 
 class AuditLogService {
   private static instance: AuditLogService | null = null;
@@ -99,7 +106,7 @@ class AuditLogService {
   }
 
   private async ensureAuditTable(): Promise<void> {
-    if (this.isTableInitialized) return;
+    if (!pool || this.isTableInitialized) return;
     try {
       const client = await pool.connect();
       try {
@@ -146,14 +153,15 @@ class AuditLogService {
     }
 
     console.log(
-      `🛡️ [AUDIT LOG] [${fullEntry.actorRole.toUpperCase()}] ${fullEntry.actorName} performed ` +
+      `[AUDIT_LOG] [${fullEntry.actorRole.toUpperCase()}] ${fullEntry.actorName} performed ` +
       `[${fullEntry.action}] on ${fullEntry.targetType}: ${fullEntry.targetName || 'N/A'}`
     );
 
     // 2. Persist to PostgreSQL if available
-    try {
-      await this.ensureAuditTable();
-      const client = await pool.connect();
+    if (pool) {
+      try {
+        await this.ensureAuditTable();
+        const client = await pool.connect();
       try {
         await client.query(
           `INSERT INTO audit_logs (
@@ -172,11 +180,12 @@ class AuditLogService {
             fullEntry.createdAt,
           ]
         );
-      } finally {
-        client.release();
+        } finally {
+          client.release();
+        }
+      } catch (err: any) {
+        console.warn('[AuditLogService] PostgreSQL log persistence notice:', err.message);
       }
-    } catch (err: any) {
-      console.warn('[AuditLogService] PostgreSQL log persistence notice:', err.message);
     }
 
     return fullEntry;
@@ -194,50 +203,52 @@ class AuditLogService {
     const limit = filter?.limit || 50;
 
     // Try reading from PostgreSQL
-    try {
-      const client = await pool.connect();
+    if (pool) {
       try {
-        let query = `SELECT id, actor_id, actor_name, actor_role, action, target_type, target_id, target_name, details, ip_address, created_at 
-                     FROM audit_logs WHERE 1=1`;
-        const params: any[] = [];
+        const client = await pool.connect();
+        try {
+          let query = `SELECT id, actor_id, actor_name, actor_role, action, target_type, target_id, target_name, details, ip_address, created_at 
+                       FROM audit_logs WHERE 1=1`;
+          const params: any[] = [];
 
-        if (filter?.action && filter.action !== 'all') {
-          params.push(filter.action);
-          query += ` AND action = $${params.length}`;
-        }
-        if (filter?.actorRole && filter.actorRole !== 'all') {
-          params.push(filter.actorRole);
-          query += ` AND actor_role = $${params.length}`;
-        }
-        if (filter?.targetType && filter.targetType !== 'all') {
-          params.push(filter.targetType);
-          query += ` AND target_type = $${params.length}`;
-        }
+          if (filter?.action && filter.action !== 'all') {
+            params.push(filter.action);
+            query += ` AND action = $${params.length}`;
+          }
+          if (filter?.actorRole && filter.actorRole !== 'all') {
+            params.push(filter.actorRole);
+            query += ` AND actor_role = $${params.length}`;
+          }
+          if (filter?.targetType && filter.targetType !== 'all') {
+            params.push(filter.targetType);
+            query += ` AND target_type = $${params.length}`;
+          }
 
-        query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
-        params.push(limit);
+          query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+          params.push(limit);
 
-        const res = await client.query(query, params);
-        if (res.rows.length > 0) {
-          return res.rows.map(r => ({
-            id: r.id,
-            actorId: r.actor_id,
-            actorName: r.actor_name,
-            actorRole: r.actor_role,
-            action: r.action,
-            targetType: r.target_type,
-            targetId: r.target_id,
-            targetName: r.target_name,
-            details: r.details,
-            ipAddress: r.ip_address,
-            createdAt: r.created_at,
-          }));
+          const res = await client.query(query, params);
+          if (res.rows.length > 0) {
+            return res.rows.map(r => ({
+              id: r.id,
+              actorId: r.actor_id,
+              actorName: r.actor_name,
+              actorRole: r.actor_role,
+              action: r.action,
+              targetType: r.target_type,
+              targetId: r.target_id,
+              targetName: r.target_name,
+              details: r.details,
+              ipAddress: r.ip_address,
+              createdAt: r.created_at,
+            }));
+          }
+        } finally {
+          client.release();
         }
-      } finally {
-        client.release();
+      } catch {
+        // Fall through to memory logs
       }
-    } catch {
-      // Fall through to memory logs
     }
 
     // Fallback filter on memory logs

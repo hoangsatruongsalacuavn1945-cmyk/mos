@@ -10,6 +10,7 @@ import { auth } from '../lib/firebase';
 import { 
   getStoredGoogleToken, 
   saveStoredGoogleToken, 
+  clearStoredGoogleToken,
   requestGoogleSheetsToken,
   saveStoredSpreadsheetId,
   getStoredSpreadsheetId,
@@ -231,6 +232,10 @@ export async function getOrInitializeSyncSpreadsheet(
   });
 
   if (!createRes.ok) {
+    if (createRes.status === 401) {
+      clearStoredGoogleToken();
+      throw new Error('Phiên xác thực Google OAuth đã hết hạn hoặc không hợp lệ (401). Vui lòng kết nối lại tài khoản Google.');
+    }
     const errText = await createRes.text();
     throw new Error(`Không thể khởi tạo Google Sheet: ${errText}`);
   }

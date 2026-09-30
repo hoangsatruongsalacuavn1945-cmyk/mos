@@ -1,4 +1,5 @@
 // Google Sheets & Drive API Integration for MOS Master Exam Training Platform
+import { signInWithGoogle } from '../lib/firebase';
 
 const GOOGLE_CLIENT_ID = '799123061018-eujgscp42l55367b64fvs00bqbso4ij9.apps.googleusercontent.com';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
@@ -10,20 +11,41 @@ declare global {
   }
 }
 
-// In-memory / localStorage token storage
+// In-memory token storage (recommended by Workspace integration guidelines)
+let inMemoryGoogleAccessToken: string | null = null;
 const TOKEN_KEY = 'mos_google_sheets_token';
 const SPREADSHEET_ID_KEY = 'mos_google_spreadsheet_id';
 
+/**
+ * Retrieves the currently active Google OAuth access token.
+ * Validates that the token starts with 'ya29.' and clears stale or corrupted tokens.
+ */
 export function getStoredGoogleToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+  const token = inMemoryGoogleAccessToken || sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+  if (!token || typeof token !== 'string') return null;
+
+  // Real Google OAuth 2.0 Access Tokens start with 'ya29.'
+  if (!token.startsWith('ya29.')) {
+    clearStoredGoogleToken();
+    return null;
+  }
+  return token;
 }
 
 export function saveStoredGoogleToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  if (typeof token === 'string' && token.startsWith('ya29.')) {
+    inMemoryGoogleAccessToken = token;
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
+  }
 }
 
 export function clearStoredGoogleToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  inMemoryGoogleAccessToken = null;
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
 }
 
 export function getStoredSpreadsheetId(): string | null {
@@ -34,52 +56,61 @@ export function saveStoredSpreadsheetId(id: string): void {
   localStorage.setItem(SPREADSHEET_ID_KEY, id);
 }
 
-// Request Access Token using Google Identity Services (GIS)
-export function requestGoogleSheetsToken(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!window.google?.accounts?.oauth2) {
-      // Fallback: wait for script to load if needed
-      let attempts = 0;
-      const interval = setInterval(() => {
-        attempts++;
-        if (window.google?.accounts?.oauth2) {
-          clearInterval(interval);
-          initAndRequest();
-        } else if (attempts > 15) {
-          clearInterval(interval);
-          reject(new Error('Thư viện Google Identity Services chưa tải xong. Vui lòng thử lại.'));
-        }
-      }, 300);
-      return;
+/**
+ * Request Access Token using Firebase Google Auth with Sheets & Drive scopes.
+ * Fallbacks to GIS TokenClient if needed.
+ */
+export async function requestGoogleSheetsToken(forcePrompt = false): Promise<string> {
+  if (!forcePrompt) {
+    const existing = getStoredGoogleToken();
+    if (existing) {
+      return existing;
     }
+  }
 
-    initAndRequest();
+  // 1. Primary: Use Firebase Auth popup with configured GoogleAuthProvider
+  try {
+    const res = await signInWithGoogle();
+    if (res?.accessToken && res.accessToken.startsWith('ya29.')) {
+      saveStoredGoogleToken(res.accessToken);
+      return res.accessToken;
+    }
+  } catch (err: any) {
+    console.warn('[GoogleSheetsService] Firebase signInWithGoogle error or popup cancelled:', err);
+    // If popup was cancelled or failed, do not swallow silently
+    if (err?.code === 'auth/popup-closed-by-user') {
+      throw new Error('Cửa sổ đăng nhập Google đã bị đóng trước khi hoàn tất.');
+    }
+  }
 
-    function initAndRequest() {
+  // 2. Secondary: Fallback to Google Identity Services (GIS) if loaded in window
+  if (window.google?.accounts?.oauth2) {
+    return new Promise((resolve, reject) => {
       try {
         const client = window.google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
           scope: SCOPES,
           callback: (response: any) => {
             if (response.error) {
-              console.error('GIS Error:', response);
               reject(new Error(response.error_description || response.error));
               return;
             }
-            if (response.access_token) {
+            if (response.access_token && response.access_token.startsWith('ya29.')) {
               saveStoredGoogleToken(response.access_token);
               resolve(response.access_token);
             } else {
-              reject(new Error('Không nhận được mã truy cập (access token) từ Google.'));
+              reject(new Error('Không nhận được mã truy cập (access token) hợp lệ từ Google.'));
             }
           },
         });
-        client.requestAccessToken();
-      } catch (err) {
-        reject(err);
+        client.requestAccessToken({ prompt: 'consent' });
+      } catch (e) {
+        reject(e);
       }
-    }
-  });
+    });
+  }
+
+  throw new Error('Chưa cấp quyền Google OAuth. Vui lòng bấm Kết nối Google Sheets và chọn tài khoản của bạn.');
 }
 
 // Ensure a sheet tab exists, if not, create it and write headers
@@ -290,6 +321,10 @@ export async function getOrCreateMosSpreadsheet(accessToken: string): Promise<{ 
   });
 
   if (!createRes.ok) {
+    if (createRes.status === 401) {
+      clearStoredGoogleToken();
+      throw new Error('Phiên xác thực Google OAuth đã hết hạn hoặc không hợp lệ (401). Vui lòng kết nối lại tài khoản Google.');
+    }
     const errText = await createRes.text();
     throw new Error(`Tạo bảng tính Google Sheets thất bại: ${errText}`);
   }
@@ -494,6 +529,10 @@ export async function appendUserRegistrationToSheet(
     );
 
     if (!appendRes.ok) {
+      if (appendRes.status === 401) {
+        clearStoredGoogleToken();
+        return { success: false, spreadsheetUrl: url, error: 'Phiên xác thực Google OAuth đã hết hạn (401). Vui lòng kết nối lại tài khoản Google.' };
+      }
       const errText = await appendRes.text();
       return { success: false, spreadsheetUrl: url, error: errText };
     }
@@ -551,6 +590,10 @@ export async function appendUserLoginToSheet(
     );
 
     if (!appendRes.ok) {
+      if (appendRes.status === 401) {
+        clearStoredGoogleToken();
+        return { success: false, error: 'Phiên xác thực Google OAuth đã hết hạn (401). Vui lòng kết nối lại tài khoản Google.' };
+      }
       const errText = await appendRes.text();
       return { success: false, error: errText };
     }
@@ -613,6 +656,10 @@ export async function appendExamResultToSheet(
     );
 
     if (!appendRes.ok) {
+      if (appendRes.status === 401) {
+        clearStoredGoogleToken();
+        return { success: false, error: 'Phiên xác thực Google OAuth đã hết hạn (401). Vui lòng kết nối lại tài khoản Google.' };
+      }
       const errText = await appendRes.text();
       return { success: false, error: errText };
     }
@@ -678,6 +725,10 @@ export async function backupUserProgressToSheet(
     );
 
     if (!appendRes.ok) {
+      if (appendRes.status === 401) {
+        clearStoredGoogleToken();
+        return { success: false, error: 'Phiên xác thực Google OAuth đã hết hạn (401). Vui lòng kết nối lại tài khoản Google.' };
+      }
       const errText = await appendRes.text();
       return { success: false, error: errText };
     }

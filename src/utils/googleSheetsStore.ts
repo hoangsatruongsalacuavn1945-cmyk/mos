@@ -159,11 +159,30 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
   },
 
   backupLearningProgress: async (payload: UserLearningProgressBackupPayload) => {
-    const { isConnected, historyLogs } = get();
-    if (!isConnected) return false;
+    let token = getStoredGoogleToken();
+    if (!token) {
+      const connected = await get().connect();
+      if (!connected) return false;
+      token = getStoredGoogleToken();
+    }
+    if (!token) return false;
 
     set({ isBackingUp: true });
-    const res = await backupUserProgressToSheet(payload);
+    let res = await backupUserProgressToSheet(payload, token);
+
+    // If failed due to 401 unauthenticated, clear token and retry connect once
+    if (!res.success && res.error && (res.error.includes('401') || res.error.includes('UNAUTHENTICATED') || res.error.includes('hết hạn'))) {
+      clearStoredGoogleToken();
+      set({ isConnected: false });
+      const reconnected = await get().connect();
+      if (reconnected) {
+        const freshToken = getStoredGoogleToken();
+        if (freshToken) {
+          res = await backupUserProgressToSheet(payload, freshToken);
+        }
+      }
+    }
+
     set({ isBackingUp: false });
 
     const newLog: BackupHistoryLog = {
@@ -172,13 +191,14 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
       type: 'progress',
       title: `Cập nhật tiến độ 3 môn: Master ${payload.masterPct}%`,
       status: res.success ? 'success' : 'error',
-      details: res.success ? 'Đã ghi 1 hàng vào Tiến Độ Học Tập' : res.error,
+      details: res.success ? 'Đã ghi 1 hàng vào Tiến Độ Học Tập' : (res.error || 'Lỗi đồng bộ'),
     };
 
-    const updatedLogs = [newLog, ...historyLogs.slice(0, 19)];
+    const updatedLogs = [newLog, ...get().historyLogs.slice(0, 19)];
     localStorage.setItem('mos_sheets_logs', JSON.stringify(updatedLogs));
 
     set({ 
+      isConnected: Boolean(getStoredGoogleToken()),
       lastBackupTime: new Date().toISOString(),
       historyLogs: updatedLogs,
       spreadsheetUrl: res.spreadsheetUrl || get().spreadsheetUrl

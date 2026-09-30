@@ -1,5 +1,9 @@
 export type UserRole = 'guest' | 'student' | 'teacher' | 'admin';
 
+export function isValidRole(role: unknown): role is UserRole {
+  return typeof role === 'string' && ['guest', 'student', 'teacher', 'admin'].includes(role);
+}
+
 export interface IUser {
   id?: string;
   name: string;

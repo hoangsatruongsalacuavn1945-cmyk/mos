@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
-import { useAuthStore } from '../utils/userStore';
+import { useAuthStore, AUTH_TOKEN_KEY } from '../utils/userStore';
 import { useUserProgressStore } from '../utils/userProgressStore';
 import { syncCurrentSessionUserProfile } from '../services/userProfileSheetSyncService';
 import { soundManager } from '../utils/audio';
@@ -65,7 +65,7 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
     setActionMessage('Đang gửi yêu cầu sao lưu xuống máy chủ Node.js...');
 
     try {
-      const token = localStorage.getItem('token') || (user as any)?.token;
+      const token = localStorage.getItem(AUTH_TOKEN_KEY) || (user as any)?.token;
       const res = await fetch('/api/admin/backup-sheets', {
         method: 'POST',
         headers: {

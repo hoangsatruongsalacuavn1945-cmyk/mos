@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile, TeacherProfile } from '../types/user';
-import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT, OWNER_PROFILE, getTeachers, useAuthStore } from '../utils/userStore';
+import { DEFAULT_TEACHERS, saveCurrentUser, DEFAULT_STUDENT, OWNER_PROFILE, getTeachers, useAuthStore, AUTH_TOKEN_KEY } from '../utils/userStore';
 import { appendUserRegistrationToSheet, appendUserLoginToSheet } from '../services/googleSheetsService';
 import { soundManager } from '../utils/audio';
 import { 
@@ -55,6 +55,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerPasskey, setOwnerPasskey] = useState('');
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleOwnerLogin = async () => {
@@ -87,7 +97,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         throw new Error('Tài khoản này không có quyền Quản Trị Viên (Admin).');
       }
 
-      localStorage.setItem('mos_jwt_token', data.token);
+      localStorage.setItem(AUTH_TOKEN_KEY, data.token);
 
       const owner: UserProfile = {
         ...OWNER_PROFILE,
@@ -133,7 +143,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       const data = await res.json();
       if (data.token) {
-        localStorage.setItem('mos_jwt_token', data.token);
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
       }
 
       const user: UserProfile = {
@@ -203,7 +213,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       const data = await res.json();
       if (data.token) {
-        localStorage.setItem('mos_jwt_token', data.token);
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
       }
 
       const user: UserProfile = {
@@ -291,11 +301,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Xác thực không thành công.');
+        throw new Error(data.message || data.error || 'Xác thực không thành công.');
       }
 
       if (data.token) {
-        localStorage.setItem('mos_jwt_token', data.token);
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
       }
 
       const user: UserProfile = {

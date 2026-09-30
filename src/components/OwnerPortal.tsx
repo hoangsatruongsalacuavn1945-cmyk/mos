@@ -480,7 +480,7 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
             </span>
             <h2 className="text-xl font-black text-white">Yêu Cầu Quyền Chủ Sở Hữu (Owner)</h2>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Khu vực này được bảo vệ nghiêm ngặt. Chỉ tài khoản Chủ sở hữu hệ thống (<code className="text-amber-300">hoangsatruongsalacuavn1945@gmail.com</code>) mới có quyền truy cập bảng phân quyền và nhật ký kiểm toán.
+              Khu vực này được bảo vệ nghiêm ngặt. Chỉ tài khoản Quản trị viên cấp cao (Admin) mới có quyền truy cập bảng phân quyền và nhật ký kiểm toán.
             </p>
           </div>
 

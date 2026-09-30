@@ -297,7 +297,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg shrink-0">
-              {currentUser.name.split(' ').slice(-1)[0][0]}
+              {(currentUser.name ? currentUser.name.trim().split(' ').slice(-1)[0]?.[0] : 'GV') || 'GV'}
             </div>
             <div>
               <div className="flex items-center gap-2">

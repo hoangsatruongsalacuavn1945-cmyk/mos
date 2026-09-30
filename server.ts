@@ -1,10 +1,10 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
-import { GoogleGenAI } from '@google/genai';
+import crypto from 'crypto';
 import { THEORY_QUESTIONS } from './src/data/theoryQuestions.ts';
 import aiRoutes from './server/routes/aiRoutes.ts';
 import authRouter from './server/auth.js';
@@ -12,6 +12,7 @@ import adminRoutes from './server/routes/adminRoutes.ts';
 import { fileGraderQueue } from './server/services/fileGraderQueue.ts';
 import { generateOfflineMosAnswer } from './server/services/aiFallbackService.ts';
 import { requireAuth } from './server/middleware/authMiddleware.ts';
+import { centralizedErrorHandler } from './server/middleware/errorHandler.ts';
 import { JWT_SECRET } from './server/config/jwt.ts';
 import { logger } from './server/config/logger.ts';
 
@@ -43,13 +44,28 @@ app.use(helmet({
 
 app.use(express.json());
 
-// Winston HTTP Request Logger Middleware
-app.use((req, res, next) => {
+// Request Correlation ID and Tracing Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const incomingId = req.headers['x-request-id'];
+  const requestId = (typeof incomingId === 'string' && incomingId.trim())
+    ? incomingId.trim()
+    : `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+  (req as any).requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  next();
+});
+
+// Winston HTTP Request Logger Middleware with Request ID tracing
+app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
+  const requestId = (req as any).requestId;
+
   res.on('finish', () => {
     if (req.originalUrl.startsWith('/api')) {
       const duration = Date.now() - start;
       logger.info(`HTTP ${req.method} ${req.originalUrl} [${res.statusCode}] - ${duration}ms`, {
+        requestId,
         ip: req.ip,
         statusCode: res.statusCode,
       });
@@ -58,191 +74,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Mount modular Auth, Admin & AI Proxy routers
+// Mount modular Auth, Admin & AI Proxy routers (AI routes include aiRateLimiter)
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/gemini', aiRoutes);
-
-// Initialize GoogleGenAI client according to SKILL guidelines
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({
-  apiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
-
-// System instruction for MOS Master AI Tutor
-const MOS_TUTOR_SYSTEM_INSTRUCTION = `
-Bạn là "MOS Master AI" - Chuyên gia và Giảng viên Huấn Luyện Chứng Chỉ Tin Học Quốc Tế Microsoft Office Specialist (MOS Word, MOS Excel, MOS PowerPoint) theo chuẩn khảo thí quốc tế Certiport và IIG.
-
-Nhiệm vụ của bạn:
-1. Giải đáp các thắc mắc của học sinh về lý thuyết và thực hành MOS.
-2. Hướng dẫn các thao tác chuẩn trên thanh Ribbon (Tab > Group > Command) và phím tắt hiệu quả.
-3. Giải thích cặn kẽ các công thức và hàm Excel (VLOOKUP, INDEX/MATCH, XLOOKUP, IF, SUMIFS, COUNTIF, CONCAT...), cách khắc phục lỗi (#N/A, #VALUE!, #REF!).
-4. Cảnh báo các "bẫy" hay gặp trong phòng thi MOS Certiport thực tế.
-5. Giọng điệu sư phạm thân thiện, tích cực, khuyến khích học sinh, dùng định dạng Markdown rõ ràng, dễ đọc (bullet points, bold, code block cho công thức).
-`;
-
-// Endpoint 1: General MOS AI Chat
-app.post('/api/gemini/chat', async (req: Request, res: Response) => {
-  try {
-    const { messages, subject } = req.body;
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Messages array is required.' });
-    }
-
-    if (!apiKey) {
-      return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY trên hệ thống.',
-      });
-    }
-
-    // Convert messages to prompt / history
-    const lastUserMessage = messages[messages.length - 1]?.content || '';
-    const conversationHistory = messages.slice(0, -1).map(m => `${m.role === 'user' ? 'Học sinh' : 'Gia sư MOS'}: ${m.content}`).join('\n');
-
-    const promptText = `
-Ngữ cảnh môn học đang ôn tập: ${subject || 'Tất cả (Word, Excel, PowerPoint)'}
-
-Lịch sử trò chuyện trước đó:
-${conversationHistory}
-
-Câu hỏi mới nhất của học sinh:
-"${lastUserMessage}"
-
-Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyên gia MOS Certiport.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: promptText,
-      config: {
-        systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
-
-    return res.json({ reply: response.text });
-  } catch (error: any) {
-    console.error('Error calling Gemini chat API:', error);
-    return res.status(500).json({
-      error: error?.message || 'Có lỗi xảy ra khi xử lý yêu cầu AI.',
-    });
-  }
-});
-
-// Endpoint 2: Deep Explanation for a Specific Question
-app.post('/api/gemini/explain-question', async (req: Request, res: Response) => {
-  try {
-    const { question, userAnswer, isCorrect } = req.body;
-    if (!question) {
-      return res.status(400).json({ error: 'Question data is required.' });
-    }
-
-    if (!apiKey) {
-      return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY trên hệ thống.',
-      });
-    }
-
-    const prompt = `
-Phân tích chuyên sâu câu hỏi thi MOS sau:
-- Môn thi: MOS ${question.subject?.toUpperCase()}
-- Mục tiêu kiến thức (Domain): ${question.domainName}
-- Tên câu hỏi: ${question.title}
-- Tình huống đề bài (Scenario): ${question.scenario || 'Không có'}
-- Các lựa chọn đáp án:
-${question.options?.map((opt: any) => `  * [${opt.id.toUpperCase()}]: ${opt.text}`).join('\n')}
-- Đáp án đúng chuẩn: [${question.correctAnswer?.toUpperCase()}]
-- Người học đã chọn: [${userAnswer ? userAnswer.toUpperCase() : 'Chưa chọn'}] (Kết quả: ${isCorrect ? 'ĐÚNG' : 'SAI'})
-- Đường dẫn Ribbon chuẩn: ${question.officialRibbonPath}
-
-Hãy cung cấp:
-1. 🎯 **Bản chất cốt lõi**: Tại sao thao tác này lại quan trọng trong thực tế và đề thi MOS?
-2. 🔍 **Phân tích vì sao đáp án đúng**: Hướng dẫn chi tiết từng bước trên thanh Ribbon.
-3. ⚠️ **Bẫy thi Certiport thường gặp**: Lỗi sai phổ biến mà thí sinh hay mắc phải ở dạng câu này.
-4. 💡 **Mẹo làm bài siêu tốc**: Phím tắt hoặc cách nhớ nhanh.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
-        temperature: 0.5,
-      },
-    });
-
-    return res.json({ analysis: response.text });
-  } catch (error: any) {
-    console.error('Error explaining question with Gemini:', error);
-    return res.status(500).json({
-      error: error?.message || 'Có lỗi xảy ra khi phân tích câu hỏi với AI.',
-    });
-  }
-});
-
-// Endpoint 3: Generate Custom MOS Practice Task / Scenario
-app.post('/api/gemini/generate-practice', async (req: Request, res: Response) => {
-  try {
-    const { subject, topic } = req.body;
-
-    if (!apiKey) {
-      return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY trên hệ thống.',
-      });
-    }
-
-    const prompt = `
-Hãy tạo một tình huống thực hành mô phỏng đề thi MOS Certiport mới cho môn: MOS ${subject?.toUpperCase() || 'EXCEL'}.
-Chủ đề mong muốn: ${topic || 'Ngẫu nhiên trong chương trình thi'}.
-
-Yêu cầu xuất ra theo định dạng JSON với cấu trúc sau:
-{
-  "scenarioTitle": "Tên tình huống đề bài",
-  "context": "Mô tả bối cảnh tài liệu/bảng tính/bài trình chiếu",
-  "tasks": [
-    {
-      "taskNumber": 1,
-      "instruction": "Yêu cầu thao tác cụ thể chuẩn phong cách đề thi Certiport",
-      "ribbonPath": "Tab > Group > Command",
-      "hint": "Gợi ý nhanh cách thực hiện"
-    }
-  ],
-  "learningPoints": "Kiến thức trọng tâm rút ra"
-}
-
-Chỉ trả về JSON thuần túy, không có markdown codeblock \`\`\`json.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
-        temperature: 0.6,
-      },
-    });
-
-    let parsedData = {};
-    try {
-      parsedData = JSON.parse(response.text || '{}');
-    } catch {
-      parsedData = { rawText: response.text };
-    }
-
-    return res.json(parsedData);
-  } catch (error: any) {
-    console.error('Error generating practice with Gemini:', error);
-    return res.status(500).json({
-      error: error?.message || 'Có lỗi xảy ra khi tạo đề thi với AI.',
-    });
-  }
-});
 
 // ==========================================
 // TEACHER & STUDENT SUBMISSIONS MANAGEMENT
@@ -300,6 +135,20 @@ interface ActiveExamSession {
 }
 
 const activeExamSessions = new Map<string, ActiveExamSession>();
+
+// O(1) Question Map for instant lookup (avoids O(N) Array.find inside grading loops)
+const QUESTION_MAP = new Map(THEORY_QUESTIONS.map(q => [q.id, q]));
+
+// Memory leak prevention: Periodically prune exam sessions older than 2 hours
+setInterval(() => {
+  const now = Date.now();
+  const maxSessionDurationMs = 2 * 60 * 60 * 1000;
+  for (const [sId, sess] of activeExamSessions.entries()) {
+    if (now - sess.startTime > maxSessionDurationMs) {
+      activeExamSessions.delete(sId);
+    }
+  }
+}, 10 * 60 * 1000).unref();
 
 // In-memory submissions store pre-populated with realistic student submissions
 let submissionsStore: SubmissionRecord[] = [
@@ -421,8 +270,31 @@ let submissionsStore: SubmissionRecord[] = [
 // SECURE SERVER-SIDE EXAM ENGINE (ANTI-CHEAT & QUESTION BANK PROTECTION)
 // ==========================================
 
+// Rate limiter for starting exams (15 exam starts per 5 mins per IP)
+const examStartLimiterMap = new Map<string, { count: number; resetAt: number }>();
+const examRateLimiter = (req: Request, res: Response, next: () => void) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 5 * 60 * 1000;
+  const record = examStartLimiterMap.get(ip) || { count: 0, resetAt: now + windowMs };
+
+  if (now > record.resetAt) {
+    record.count = 0;
+    record.resetAt = now + windowMs;
+  }
+
+  record.count++;
+  examStartLimiterMap.set(ip, record);
+
+  if (record.count > 15) {
+    return res.status(429).json({ error: 'TooManyRequests', message: 'Bạn đang bắt đầu lượt thi mới quá nhanh. Vui lòng thử lại sau vài phút.' });
+  }
+
+  next();
+};
+
 // Endpoint: Start new exam session with sanitized questions (No answers exposed to client!)
-app.post('/api/exam/start', (req: Request, res: Response) => {
+app.post('/api/exam/start', examRateLimiter, (req: Request, res: Response, next: NextFunction) => {
   try {
     const { subject = 'all', studentId, studentName, studentCode } = req.body;
     let pool = THEORY_QUESTIONS;
@@ -473,37 +345,37 @@ app.post('/api/exam/start', (req: Request, res: Response) => {
       totalQuestions: sanitizedQuestions.length,
       questions: sanitizedQuestions,
     });
-  } catch (err: any) {
-    console.error('Error starting exam session:', err);
-    return res.status(500).json({ error: err?.message || 'Lỗi khởi tạo kỳ thi.' });
+  } catch (err) {
+    next(err);
   }
 });
 
 // Endpoint: Anti-Cheat Violation event logger
-app.post('/api/exam/violation', (req: Request, res: Response) => {
+app.post('/api/exam/violation', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sessionId, reason, timestamp } = req.body;
     const session = activeExamSessions.get(sessionId);
-    if (session) {
-      session.violationsCount += 1;
-      const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString('vi-VN') : new Date().toLocaleTimeString('vi-VN');
-      const logEntry = `[${timeStr}] ${reason || 'Phát hiện chuyển tab hoặc mất tiêu điểm màn hình thi'}`;
-      session.antiCheatLogs.push(logEntry);
-      console.warn(`[Anti-Cheat Warning] Session ${sessionId} (${session.studentName}): ${logEntry} (Tổng: ${session.violationsCount})`);
-      return res.json({
-        success: true,
-        violationsCount: session.violationsCount,
-        logs: session.antiCheatLogs,
-      });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Phiên thi không tồn tại hoặc đã kết thúc.' });
     }
-    return res.json({ success: false, message: 'Session not active' });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message });
+
+    session.violationsCount += 1;
+    const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString('vi-VN') : new Date().toLocaleTimeString('vi-VN');
+    const logEntry = `[${timeStr}] ${reason || 'Phát hiện chuyển tab hoặc mất tiêu điểm màn hình thi'}`;
+    session.antiCheatLogs.push(logEntry);
+    console.warn(`[Anti-Cheat Warning] Session ${sessionId} (${session.studentName}): ${logEntry} (Tổng: ${session.violationsCount})`);
+    return res.json({
+      success: true,
+      violationsCount: session.violationsCount,
+      logs: session.antiCheatLogs,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 
 // Endpoint: Submit exam with server-side authoritative grading
-app.post('/api/exam/submit', (req: Request, res: Response) => {
+app.post('/api/exam/submit', (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       sessionId,
@@ -519,11 +391,23 @@ app.post('/api/exam/submit', (req: Request, res: Response) => {
       antiCheatLogs = [],
     } = req.body;
 
+    if (!userAnswers || typeof userAnswers !== 'object' || Array.isArray(userAnswers)) {
+      return res.status(400).json({ error: 'Định dạng câu trả lời (userAnswers) không hợp lệ.' });
+    }
+
     const session = activeExamSessions.get(sessionId);
     const questionIds = session ? session.questionIds : Object.keys(userAnswers);
-    const questions = questionIds.map(id => THEORY_QUESTIONS.find(q => q.id === id)).filter(Boolean) as typeof THEORY_QUESTIONS;
 
-    let totalScore = 0;
+    if (questionIds.length === 0) {
+      return res.status(400).json({ error: 'Bài thi không có câu hỏi hợp lệ để chấm điểm.' });
+    }
+
+    // O(1) Map lookup instead of O(N) Array.find
+    const questions = questionIds.map(id => QUESTION_MAP.get(id)).filter(Boolean) as typeof THEORY_QUESTIONS;
+    if (questions.length === 0) {
+      return res.status(400).json({ error: 'Không tìm thấy câu hỏi trong ngân hàng đề thi.' });
+    }
+
     let correctCount = 0;
     const domainScores: Record<string, { total: number; correct: number }> = {};
     const wrongQuestions: any[] = [];
@@ -574,13 +458,22 @@ app.post('/api/exam/submit', (req: Request, res: Response) => {
       });
     });
 
-    const totalQ = questions.length || 1;
-    // Standard Certiport MOS scale: 1000 max score, 700 passing score
-    totalScore = Math.round((correctCount / totalQ) * 1000);
+    const totalQ = questions.length;
+    // Standard Certiport MOS scale: 1000 max score, 700 passing score clamped to [0, 1000]
+    const calculatedScore = Math.round((correctCount / totalQ) * 1000);
+    const totalScore = Math.max(0, Math.min(1000, calculatedScore));
     const passed = totalScore >= 700;
 
-    const finalViolations = Math.max(violationsCount, session?.violationsCount || 0);
-    const finalLogs = antiCheatLogs.length > 0 ? antiCheatLogs : (session?.antiCheatLogs || []);
+    // Server authoritative anti-cheat: Client cannot overwrite or zero-out server recorded violations
+    const sessionViolations = session ? session.violationsCount : 0;
+    const clientViolations = typeof violationsCount === 'number' ? violationsCount : 0;
+    const finalViolations = Math.max(sessionViolations, clientViolations);
+
+    // Merge server session logs with client logs safely
+    const finalLogs = Array.from(new Set([
+      ...(session ? session.antiCheatLogs : []),
+      ...(Array.isArray(antiCheatLogs) ? antiCheatLogs : [])
+    ]));
 
     const submission: SubmissionRecord = {
       id: 'sub-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -621,14 +514,13 @@ app.post('/api/exam/submit', (req: Request, res: Response) => {
       submission,
       reviewQuestions,
     });
-  } catch (err: any) {
-    console.error('Error submitting exam:', err);
-    return res.status(500).json({ error: err?.message || 'Lỗi khi chấm điểm bài thi.' });
+  } catch (err) {
+    next(err);
   }
 });
 
 // Endpoint: Debounced Exam Auto-Save (anti-disconnection and F5 recovery)
-app.post('/api/exam/autosave', (req: Request, res: Response) => {
+app.post('/api/exam/autosave', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sessionId, userAnswers, timeLeftSeconds, currentIndex, markedForReview } = req.body;
     if (sessionId && activeExamSessions.has(sessionId)) {
@@ -645,8 +537,8 @@ app.post('/api/exam/autosave', (req: Request, res: Response) => {
       savedAt: new Date().toLocaleTimeString('vi-VN'),
       message: 'Đã tự động lưu bài thi vào bộ nhớ máy chủ an toàn.' 
     });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Lỗi autosave trên máy chủ.' });
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -684,7 +576,7 @@ app.get('/api/exam/session/:sessionId', (req: Request, res: Response) => {
 });
 
 // Endpoint: Non-blocking File Grader Upload & Queue
-app.post('/api/grader/submit', (req: Request, res: Response) => {
+app.post('/api/grader/submit', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { studentId, studentName, fileName, fileSize, subject, projectId, evaluationResult } = req.body;
     if (!studentName || !subject) {
@@ -720,8 +612,8 @@ app.post('/api/grader/submit', (req: Request, res: Response) => {
       status: job.status,
       message: 'Tệp đã được đưa vào hàng đợi chấm điểm nền không làm nghẽn server.' 
     });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi hàng đợi chấm bài.' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -736,7 +628,7 @@ app.get('/api/grader/status/:id', (req: Request, res: Response) => {
 });
 
 // Endpoint: Submit exam/practice result from student
-app.post('/api/submissions', (req: Request, res: Response) => {
+app.post('/api/submissions', (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = req.body;
     if (!data.studentName || !data.subject) {
@@ -772,14 +664,13 @@ app.post('/api/submissions', (req: Request, res: Response) => {
 
     console.log(`[Auto-Sync] Received student submission from ${newSubmission.studentName} (${newSubmission.subject}): ${newSubmission.score} pts -> Assigned to Teacher: ${newSubmission.teacherName}`);
     return res.status(201).json({ success: true, submission: newSubmission });
-  } catch (error: any) {
-    console.error('Error in /api/submissions:', error);
-    return res.status(500).json({ error: error?.message || 'Lỗi khi lưu bài nộp.' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Endpoint: Get submissions filtered by teacher, student, subject
-app.get('/api/submissions', (req: Request, res: Response) => {
+app.get('/api/submissions', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { teacherId, studentId, subject, classRoom } = req.query;
 
@@ -799,13 +690,13 @@ app.get('/api/submissions', (req: Request, res: Response) => {
     }
 
     return res.json({ submissions: filtered });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi tải danh sách bài nộp.' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Endpoint: Teacher adds feedback/grade for a submission (Requires Teacher or Admin JWT)
-app.post('/api/submissions/:id/feedback', requireAuth(['teacher', 'admin']), (req: Request, res: Response) => {
+app.post('/api/submissions/:id/feedback', requireAuth(['teacher', 'admin']), (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { feedback, rating } = req.body;
@@ -821,8 +712,8 @@ app.post('/api/submissions/:id/feedback', requireAuth(['teacher', 'admin']), (re
     item.status = 'reviewed';
 
     return res.json({ success: true, submission: item });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi lưu nhận xét giáo viên.' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -880,7 +771,7 @@ app.get('/api/teachers', (_req: Request, res: Response) => {
   return res.json({ teachers: teachersStore });
 });
 
-app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response) => {
+app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = req.body;
     if (!data.name || !data.email) {
@@ -900,8 +791,8 @@ app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response) 
     teachersStore.unshift(newTeacher);
     console.log(`[Owner Action] Added new teacher: ${newTeacher.name} (${newTeacher.email})`);
     return res.status(201).json({ success: true, teacher: newTeacher });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -929,7 +820,7 @@ app.delete('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Resp
 });
 
 // Endpoint: Protected Question Bank Proxy with Pagination (Strips answers for students, reveals for teachers verified by JWT)
-app.get('/api/questions', (req: Request, res: Response) => {
+app.get('/api/questions', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { subject, domainId, page = '1', limit = '10' } = req.query;
 
@@ -993,13 +884,13 @@ app.get('/api/questions', (req: Request, res: Response) => {
       limit: limitNum,
       questions: sanitized,
     });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi truy vấn ngân hàng câu hỏi.' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Endpoint: Evaluate submitted answers securely on server
-app.post('/api/questions/submit', (req: Request, res: Response) => {
+app.post('/api/questions/submit', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { answers } = req.body; // Record<string, string>
     if (!answers || typeof answers !== 'object') {
@@ -1030,27 +921,27 @@ app.post('/api/questions/submit', (req: Request, res: Response) => {
       scorePercentage: totalAnswered > 0 ? Math.round((correctCount / totalAnswered) * 100) : 0,
       results,
     });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi chấm điểm bài thi.' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Endpoint: Granular Attempt & Results Details
-app.get('/api/attempts/:id', (req: Request, res: Response) => {
+app.get('/api/attempts/:id', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const submission = submissionsStore.find(s => s.id === id);
     if (!submission) {
-      return res.status(404).json({ error: 'Không tìm thấy lượt thi với ID này.' });
+      return res.status(404).json({ error: 'NotFound', message: 'Không tìm thấy lượt thi với ID này.' });
     }
     return res.json({ attempt: submission });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi truy xuất chi tiết lượt thi.' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Endpoint: Leaderboard
-app.get('/api/leaderboard', (req: Request, res: Response) => {
+app.get('/api/leaderboard', (req: Request, res: Response, next: NextFunction) => {
   try {
     const { subject } = req.query;
     let list = [...submissionsStore];
@@ -1076,10 +967,29 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
     }));
 
     return res.json({ leaderboard: top });
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message || 'Lỗi tải bảng vàng.' });
+  } catch (error) {
+    next(error);
   }
 });
+
+// 404 Catch-All handler for unmatched API routes
+app.all('/api/*', (req: Request, res: Response) => {
+  const requestId = (req as any).requestId || 'unknown';
+  logger.warn(`API Route Not Found: ${req.method} ${req.originalUrl}`, {
+    requestId,
+    ip: req.ip,
+  });
+  return res.status(404).json({
+    error: 'NotFound',
+    message: `Tuyến API ${req.method} ${req.originalUrl} không tồn tại trên máy chủ.`,
+    requestId,
+  });
+});
+
+// Centralized Error-Handling Middleware
+// Captures all operational & unhandled errors, logs detailed stack traces via Winston,
+// and responds to the client with sanitized JSON containing a unique request ID.
+app.use(centralizedErrorHandler);
 
 // Mount Vite middleware in development or serve static in production
 async function startServer() {
