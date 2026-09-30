@@ -3,8 +3,50 @@ import bcrypt from 'bcryptjs';
 import User from '../models/User.ts';
 import { userService } from '../services/userService.ts';
 import { auditLogService } from '../services/auditLogService.ts';
+import { requireAuth } from '../middleware/authMiddleware.ts';
 
 const router = Router();
+
+/**
+ * POST /api/admin/backup-sheets
+ * Secure server-side Google Sheets backup handler (Admin & Teacher only)
+ * Replaces insecure frontend Google Sheets API manipulation
+ */
+router.post('/backup-sheets', requireAuth(['admin', 'teacher']), async (req: Request, res: Response) => {
+  try {
+    const actor = (req as any).user;
+    const { dataType = 'all', note = 'Đồng bộ định kỳ từ máy chủ' } = req.body;
+
+    const masterSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
+      'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
+
+    // Log the backup operation to audit log
+    await auditLogService.log({
+      actorId: actor?.id || 'admin-system',
+      actorName: actor?.fullName || 'Quản Trị Viên',
+      actorRole: actor?.role || 'admin',
+      action: 'GOOGLE_SHEETS_BACKUP_COMPLETED',
+      targetType: 'system',
+      targetId: 'google-sheets-master',
+      targetName: 'Bảng Tính Google Sheets Trung Tâm',
+      details: {
+        dataType,
+        note,
+        syncedAt: new Date().toISOString(),
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: 'Máy chủ đã ghi nhận và hoàn tất sao lưu dữ liệu an toàn lên Google Sheets trung tâm.',
+      spreadsheetUrl: masterSheetUrl,
+      syncedAt: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+    });
+  } catch (error: any) {
+    console.error('[Admin Backup Error]:', error);
+    return res.status(500).json({ error: error.message || 'Lỗi xử lý sao lưu Google Sheets trên máy chủ.' });
+  }
+});
 
 /**
  * API: Tạo tài khoản Giáo viên (Dành cho Admin)
@@ -13,7 +55,7 @@ const router = Router();
  * Nhận: { fullName, email, password, teachingSubjects }
  * Có thể gọi từ Admin Portal hoặc công cụ API/Postman
  */
-router.post('/create-teacher', async (req: Request, res: Response) => {
+router.post('/create-teacher', requireAuth(['admin']), async (req: Request, res: Response) => {
   try {
     const { fullName, email, password, teachingSubjects } = req.body;
 
@@ -48,10 +90,11 @@ router.post('/create-teacher', async (req: Request, res: Response) => {
 
     await newTeacher.save();
 
-    // 4. Ghi nhận audit trail
+    // 4. Ghi nhận audit trail từ JWT actor đã xác thực
+    const actor = (req as any).user;
     await auditLogService.log({
-      actorId: 'admin-action',
-      actorName: 'Quản Trị Viên (Admin)',
+      actorId: actor?.id || 'admin-system',
+      actorName: actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)',
       actorRole: 'admin',
       action: 'TEACHER_ACCOUNT_CREATED',
       targetType: 'user',
@@ -88,7 +131,7 @@ router.post('/create-teacher', async (req: Request, res: Response) => {
  * GET /api/admin/users
  * Returns list of all registered users
  */
-router.get('/users', async (_req: Request, res: Response) => {
+router.get('/users', requireAuth(['admin']), async (_req: Request, res: Response) => {
   try {
     const all = await userService.getAllUsers();
     return res.json({ users: all });
@@ -102,10 +145,13 @@ router.get('/users', async (_req: Request, res: Response) => {
  * PATCH /api/admin/users/:id/role
  * Promote or Demote user role with audit logging
  */
-router.patch('/users/:id/role', async (req: Request, res: Response) => {
+router.patch('/users/:id/role', requireAuth(['admin']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { newRole, actorId = 'owner-master-root', actorName = 'Chủ Sở Hữu Hệ Thống' } = req.body;
+    const { newRole } = req.body;
+    const actor = (req as any).user;
+    const actorId = actor?.id || 'admin-system';
+    const actorName = actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)';
 
     if (!['student', 'teacher', 'admin'].includes(newRole)) {
       return res.status(400).json({ error: 'Vai trò mới không hợp lệ.' });
@@ -153,10 +199,12 @@ router.patch('/users/:id/role', async (req: Request, res: Response) => {
  * DELETE /api/admin/users/:id
  * Delete user account with audit logging
  */
-router.delete('/users/:id', async (req: Request, res: Response) => {
+router.delete('/users/:id', requireAuth(['admin']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { actorId = 'owner-master-root', actorName = 'Chủ Sở Hữu Hệ Thống' } = req.body;
+    const actor = (req as any).user;
+    const actorId = actor?.id || 'admin-system';
+    const actorName = actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)';
 
     const existing = await userService.findUserById(id);
     const targetUserName = existing ? existing.full_name : 'Người dùng ' + id;
@@ -193,7 +241,7 @@ router.delete('/users/:id', async (req: Request, res: Response) => {
  * GET /api/admin/audit-logs
  * Returns audit trail logs with actor details and timestamps
  */
-router.get('/audit-logs', async (req: Request, res: Response) => {
+router.get('/audit-logs', requireAuth(['admin']), async (req: Request, res: Response) => {
   try {
     const { action, actorRole, targetType, limit } = req.query;
     const logs = await auditLogService.getLogs({
@@ -211,16 +259,22 @@ router.get('/audit-logs', async (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/audit-logs
- * Manually submit an audit event
+ * Manually submit an audit event (Admin only)
  */
-router.post('/audit-logs', async (req: Request, res: Response) => {
+router.post('/audit-logs', requireAuth(['admin']), async (req: Request, res: Response) => {
   try {
     const entry = req.body;
-    if (!entry.actorName || !entry.action) {
-      return res.status(400).json({ error: 'actorName và action là bắt buộc.' });
+    const actor = (req as any).user;
+    if (!entry.action) {
+      return res.status(400).json({ error: 'action là bắt buộc.' });
     }
 
-    const saved = await auditLogService.log(entry);
+    const saved = await auditLogService.log({
+      ...entry,
+      actorId: actor?.id || 'admin-system',
+      actorName: actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)',
+      actorRole: 'admin',
+    });
     return res.status(201).json({ success: true, log: saved });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

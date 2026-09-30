@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { aiRateLimiter, getUserQuotaInfo } from '../middleware/aiRateLimiter.ts';
+import { generateOfflineMosAnswer } from '../services/aiFallbackService.ts';
 
 dotenv.config();
 
 const router = Router();
+
+// Endpoint to inspect remaining daily credits
+router.get('/credits', (req: Request, res: Response) => {
+  const info = getUserQuotaInfo(req);
+  return res.json(info);
+});
 
 // Securely access API key EXCLUSIVELY on the server side from process.env
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -35,9 +43,9 @@ Nhiệm vụ của bạn:
 
 /**
  * Route: POST /api/gemini/chat
- * General AI tutor conversation proxy
+ * General AI tutor conversation proxy with Rate Limiting and Token Quota
  */
-router.post('/chat', async (req: Request, res: Response) => {
+router.post('/chat', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const { messages, subject } = req.body;
     if (!messages || !Array.isArray(messages)) {
@@ -69,7 +77,7 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
@@ -79,9 +87,17 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
 
     return res.json({ reply: response.text });
   } catch (error: any) {
-    console.error('[AI Proxy Error] /api/gemini/chat failed:', error);
-    return res.status(500).json({
-      error: error?.message || 'Có lỗi xảy ra khi xử lý yêu cầu AI trên server.',
+    console.error('[AI Proxy Error] /api/gemini/chat failed:', error?.message);
+
+    // Graceful fallback when Gemini quota/billing is exhausted or network fails
+    const lastUserMessage = req.body?.messages?.[req.body.messages.length - 1]?.content || '';
+    const subject = req.body?.subject || '';
+    const fallbackAnswer = generateOfflineMosAnswer(lastUserMessage, subject);
+
+    return res.json({
+      reply: fallbackAnswer,
+      isFallback: true,
+      notice: 'Hệ thống đang hoạt động với Cơ Sở Tri Thức Khảo Thí MOS Tích Hợp (Hạn mức Gemini Cloud tạm thời bận).',
     });
   }
 });
@@ -90,7 +106,7 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
  * Route: POST /api/gemini/explain-question
  * Detailed explanation proxy for specific question review
  */
-router.post('/explain-question', async (req: Request, res: Response) => {
+router.post('/explain-question', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const { question, userAnswer, isCorrect } = req.body;
     if (!question) {
@@ -122,7 +138,7 @@ Yêu cầu phân tích:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
@@ -143,7 +159,7 @@ Yêu cầu phân tích:
  * Route: POST /api/gemini/generate-practice
  * Dynamic practice task generator proxy
  */
-router.post('/generate-practice', async (req: Request, res: Response) => {
+router.post('/generate-practice', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const { subject, difficulty, domainName, customPrompt } = req.body;
 
@@ -178,7 +194,7 @@ Hãy trả về kết quả theo định dạng JSON hợp lệ duy nhất với
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,

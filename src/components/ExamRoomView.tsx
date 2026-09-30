@@ -97,12 +97,97 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
   const [submissionResult, setSubmissionResult] = useState<any | null>(null);
   const [reviewQuestions, setReviewQuestions] = useState<ReviewQuestion[]>([]);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong' | 'marked'>('all');
+  const [lastSavedText, setLastSavedText] = useState<string>('Tự động lưu kích hoạt');
 
   const warningTimeoutRef = useRef<any>(null);
+  const debounceSyncTimeoutRef = useRef<any>(null);
+
+  // Debounced server sync (5 seconds)
+  const syncDraftToServer = (
+    currentSessionId: string, 
+    answers: Record<string, string>, 
+    remainingTime: number,
+    currIdx: number,
+    reviewMarks: Record<string, boolean>
+  ) => {
+    if (!currentSessionId) return;
+    if (debounceSyncTimeoutRef.current) {
+      clearTimeout(debounceSyncTimeoutRef.current);
+    }
+
+    debounceSyncTimeoutRef.current = setTimeout(async () => {
+      try {
+        await fetch('/api/exam/autosave', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
+            userAnswers: answers,
+            timeLeftSeconds: remainingTime,
+            currentIndex: currIdx,
+            markedForReview: reviewMarks,
+          }),
+        });
+        setLastSavedText(`Đã lưu máy chủ (${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })})`);
+      } catch (e) {
+        setLastSavedText('Đã lưu cục bộ (F5 an toàn)');
+      }
+    }, 5000);
+  };
+
+  const persistDraft = (
+    currentSessionId: string,
+    qs: SanitizedQuestion[],
+    answers: Record<string, string>,
+    remainingTime: number,
+    currIdx: number,
+    reviewMarks: Record<string, boolean>
+  ) => {
+    try {
+      localStorage.setItem(`${LOCAL_DRAFT_KEY}_${selectedSubject}`, JSON.stringify({
+        sessionId: currentSessionId,
+        subject: selectedSubject,
+        questions: qs,
+        userAnswers: answers,
+        timeLeftSeconds: remainingTime,
+        currentIndex: currIdx,
+        markedForReview: reviewMarks,
+        savedAt: Date.now(),
+      }));
+      setLastSavedText(`Đã lưu (${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })})`);
+    } catch {}
+
+    syncDraftToServer(currentSessionId, answers, remainingTime, currIdx, reviewMarks);
+  };
 
   // Initialize or fetch questions from secure server API
   const startExam = async () => {
     setLoading(true);
+
+    // 1. Check for recoverable active draft on F5 / reconnection
+    try {
+      const existingRaw = localStorage.getItem(`${LOCAL_DRAFT_KEY}_${selectedSubject}`);
+      if (existingRaw) {
+        const draft = JSON.parse(existingRaw);
+        const isFresh = draft && draft.savedAt && (Date.now() - draft.savedAt < 50 * 60 * 1000);
+        if (isFresh && draft.sessionId && draft.questions?.length > 0 && draft.timeLeftSeconds > 5) {
+          setSessionId(draft.sessionId);
+          setQuestions(draft.questions);
+          setUserAnswers(draft.userAnswers || {});
+          setMarkedForReview(draft.markedForReview || {});
+          setTimeLeftSeconds(draft.timeLeftSeconds);
+          setCurrentIndex(draft.currentIndex || 0);
+          setIsSubmitted(false);
+          setLastSavedText('Đã phục hồi bài làm sau F5');
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Draft recovery skipped:', e);
+    }
+
+    // 2. Fresh Exam Session from server
     try {
       const res = await fetch('/api/exam/start', {
         method: 'POST',
@@ -120,9 +205,12 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
       }
 
       const data = await res.json();
+      const loadedQuestions = data.questions || [];
+      const duration = data.durationSeconds || 50 * 60;
+
       setSessionId(data.sessionId);
-      setQuestions(data.questions || []);
-      setTimeLeftSeconds(data.durationSeconds || 50 * 60);
+      setQuestions(loadedQuestions);
+      setTimeLeftSeconds(duration);
       setUserAnswers({});
       setMarkedForReview({});
       setIsSubmitted(false);
@@ -130,13 +218,8 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
       setAntiCheatLogs([]);
       setCurrentIndex(0);
 
-      // Save draft starter
-      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({
-        sessionId: data.sessionId,
-        subject: selectedSubject,
-        userAnswers: {},
-        timeLeftSeconds: data.durationSeconds,
-      }));
+      // Save initial draft
+      persistDraft(data.sessionId, loadedQuestions, {}, duration, 0, {});
     } catch (err) {
       console.error('Failed to load exam questions from server:', err);
     } finally {
@@ -256,18 +339,22 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
     const currentQ = questions[currentIndex];
     if (!currentQ) return;
     soundManager.playClick();
-    setUserAnswers(prev => ({
-      ...prev,
+    const updated = {
+      ...userAnswers,
       [currentQ.id]: optionId,
-    }));
+    };
+    setUserAnswers(updated);
+    persistDraft(sessionId, questions, updated, timeLeftSeconds, currentIndex, markedForReview);
   };
 
   const toggleReviewMark = (qId: string) => {
     soundManager.playClick();
-    setMarkedForReview(prev => ({
-      ...prev,
-      [qId]: !prev[qId],
-    }));
+    const updatedMarks = {
+      ...markedForReview,
+      [qId]: !markedForReview[qId],
+    };
+    setMarkedForReview(updatedMarks);
+    persistDraft(sessionId, questions, userAnswers, timeLeftSeconds, currentIndex, updatedMarks);
   };
 
   // Submit exam with Authoritative Server Evaluation

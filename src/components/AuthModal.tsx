@@ -45,53 +45,69 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Custom Form States
   const [name, setName] = useState(currentUser.name);
   const [email, setEmail] = useState(currentUser.email);
-  const [password, setPassword] = useState('Password123!');
+  const [password, setPassword] = useState('');
   const [studentCode, setStudentCode] = useState(currentUser.studentCode || 'K24-CNTT-089');
   const [classRoom, setClassRoom] = useState(currentUser.classRoom || 'Lớp MOS-TinHoc01');
   const [targetSubject, setTargetSubject] = useState<'word' | 'excel' | 'powerpoint' | 'all'>(currentUser.targetSubject || 'all');
   const [selectedTeacherId, setSelectedTeacherId] = useState(currentUser.assignedTeacherId || DEFAULT_TEACHERS[1].id);
 
-  // Owner Auth States
-  const [ownerEmail, setOwnerEmail] = useState('hoangsatruongsalacuavn1945@gmail.com');
-  const [ownerPasskey, setOwnerPasskey] = useState('MOS_MASTER_OWNER_2026!');
+  // Owner Auth States (Empty defaults, no hardcoded secrets or backdoors)
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [ownerPasskey, setOwnerPasskey] = useState('');
 
   if (!isOpen) return null;
 
   const handleOwnerLogin = async () => {
-    soundManager.playCorrect();
+    if (!ownerEmail || !ownerPasskey) {
+      setErrorMessage('Vui lòng nhập đầy đủ Email và Mật khẩu Quản Trị Viên.');
+      soundManager.playWrong();
+      return;
+    }
+
+    soundManager.playClick();
     setIsLoading(true);
+    setErrorMessage('');
+
     try {
-      const res = await fetch('/api/auth/quick-login', {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Chủ Sở Hữu Hệ Thống (Master Owner)',
           email: ownerEmail.trim(),
-          role: 'admin',
+          password: ownerPasskey,
         }),
       });
-      const data = await res.json();
-      if (data.token) {
-        localStorage.setItem('mos_jwt_token', data.token);
-      }
-    } catch {}
 
-    const owner: UserProfile = {
-      ...OWNER_PROFILE,
-      email: ownerEmail.trim(),
-    };
-    saveCurrentUser(owner);
-    useAuthStore.getState().login(owner, 'owner-jwt-token');
-    appendUserLoginToSheet({
-      uid: owner.id,
-      name: owner.name,
-      email: owner.email || '',
-      role: 'admin',
-      provider: 'Chủ sở hữu (Owner Root)',
-    }).catch((e) => console.warn('Owner Google Sheets sync:', e));
-    onUserChanged(owner);
-    onClose();
-    setIsLoading(false);
+      const data = await res.json();
+      if (!res.ok || !data.token) {
+        throw new Error(data.message || 'Thông tin xác thực Quản Trị Viên không hợp lệ.');
+      }
+
+      if (data.user?.role !== 'admin') {
+        throw new Error('Tài khoản này không có quyền Quản Trị Viên (Admin).');
+      }
+
+      localStorage.setItem('mos_jwt_token', data.token);
+
+      const owner: UserProfile = {
+        ...OWNER_PROFILE,
+        id: data.user.id || data.user._id || OWNER_PROFILE.id,
+        name: data.user.fullName || data.user.name || OWNER_PROFILE.name,
+        email: data.user.email || ownerEmail.trim(),
+        role: 'admin',
+      };
+
+      saveCurrentUser(owner);
+      useAuthStore.getState().login(owner, data.token);
+      soundManager.playCorrect();
+      onUserChanged(owner);
+      onClose();
+    } catch (err: any) {
+      soundManager.playWrong();
+      setErrorMessage(err.message || 'Lỗi đăng nhập Quản Trị Viên.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleQuickLoginStudent = async (customName: string, customCode: string, customClass: string, tId: string, sub: 'word' | 'excel' | 'powerpoint' | 'all') => {
@@ -709,7 +725,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       required
                       value={ownerEmail}
                       onChange={e => setOwnerEmail(e.target.value)}
-                      placeholder="hoangsatruongsalacuavn1945@gmail.com"
+                      placeholder="admin@mosmaster.edu.vn"
                       className="w-full pl-9 pr-3 py-2 text-xs border border-amber-300 bg-amber-50/20 rounded-lg text-slate-900 font-mono font-medium focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                     />
                   </div>
@@ -717,7 +733,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Mã Khóa Bảo Mật Chủ Sở Hữu (Master Security Passkey) <span className="text-amber-600 font-bold">*</span>
+                    Mật Khẩu Quản Trị Viên (Admin Password) <span className="text-amber-600 font-bold">*</span>
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
@@ -726,12 +742,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       required
                       value={ownerPasskey}
                       onChange={e => setOwnerPasskey(e.target.value)}
-                      placeholder="MOS_MASTER_OWNER_2026!"
+                      placeholder="••••••••••••••••"
                       className="w-full pl-9 pr-3 py-2 text-xs border border-amber-300 bg-amber-50/20 rounded-lg text-slate-900 font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                     />
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">
-                    Chỉ tài khoản sở hữu có mã passkey này mới có thể kích hoạt toàn quyền Admin.
+                    Chỉ tài khoản có quyền Quản Trị Viên mới có thể đăng nhập vào bảng điều khiển Admin.
                   </div>
                 </div>
 

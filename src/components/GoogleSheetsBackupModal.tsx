@@ -49,6 +49,7 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
   const { getSubjectStats, getMasterProgressPercentage, getTotalCompletedLessonsCount } = useUserProgressStore();
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [isServerBackingUp, setIsServerBackingUp] = useState(false);
 
   if (!isOpen) return null;
 
@@ -57,6 +58,41 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
   if (!isAuthorized) {
     return null;
   }
+
+  const handleServerBackup = async () => {
+    soundManager.playClick();
+    setIsServerBackingUp(true);
+    setActionMessage('Đang gửi yêu cầu sao lưu xuống máy chủ Node.js...');
+
+    try {
+      const token = localStorage.getItem('token') || (user as any)?.token;
+      const res = await fetch('/api/admin/backup-sheets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          dataType: 'all',
+          note: `Sao lưu bởi ${role === 'admin' ? 'Chủ Sở Hữu' : 'Giáo Viên'} (${user.email || 'Admin'})`,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Lỗi sao lưu trên máy chủ.');
+      }
+
+      soundManager.playCorrect();
+      setActionMessage(data.message || 'Máy chủ đã hoàn tất sao lưu dữ liệu an toàn lên Google Sheets trung tâm!');
+    } catch (err: any) {
+      soundManager.playWrong();
+      setActionMessage(`Lỗi sao lưu máy chủ: ${err.message}`);
+    } finally {
+      setIsServerBackingUp(false);
+      setTimeout(() => setActionMessage(null), 5000);
+    }
+  };
 
   const handleConnect = async () => {
     soundManager.playClick();
@@ -242,6 +278,35 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
               </a>
             </div>
           )}
+        </div>
+
+        {/* Safe Server-Side Backup Section */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 to-teal-950 text-white border border-emerald-500/40 shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  Backend API · Bảo Mật Tuyệt Đối
+                </span>
+                <span className="text-xs text-emerald-300">Không lộ Token tại Client</span>
+              </div>
+              <h4 className="text-sm font-bold text-white mt-1">
+                Sao Lưu Đồng Bộ Dữ Liệu Qua Máy Chủ Node.js
+              </h4>
+              <p className="text-xs text-emerald-100/80 mt-0.5">
+                Máy chủ sẽ trực tiếp tổng hợp danh sách tài khoản, điểm số và tiến độ học tập để ghi vào Google Sheets trung tâm.
+              </p>
+            </div>
+
+            <button
+              onClick={handleServerBackup}
+              disabled={isServerBackingUp}
+              className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 shrink-0"
+            >
+              <RefreshCw className={`w-4 h-4 ${isServerBackingUp ? 'animate-spin' : ''}`} />
+              <span>{isServerBackingUp ? 'Đang Sao Lưu Máy Chủ...' : 'Sao Lưu Ngay Qua Máy Chủ'}</span>
+            </button>
+          </div>
         </div>
 
         {/* 3 Pre-formatted Sheets Architecture */}

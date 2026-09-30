@@ -1,34 +1,59 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
+import { JWT_SECRET } from '../config/jwt.ts';
 
-dotenv.config();
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  role: 'admin' | 'teacher' | 'student';
+  fullName?: string;
+  studentCode?: string;
+}
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mos_master_secure_jwt_secret_key_2026_certiport';
+export interface AuthenticatedRequest extends Request {
+  user?: AuthenticatedUser;
+}
 
-export const requireRole = (roles: string[]) => {
+/**
+ * Strict Role-Based Access Control (RBAC) middleware
+ * @param allowedRoles Array of permissible roles, e.g. ['admin', 'teacher']. If omitted, checks valid login.
+ */
+export const requireAuth = (allowedRoles?: ('admin' | 'teacher' | 'student')[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       const authHeader = req.headers.authorization;
       const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
       if (!token) {
-        return res.status(401).json({ message: 'Không có quyền truy cập. Vui lòng đăng nhập.' });
+        return res.status(401).json({ 
+          error: 'Unauthorized', 
+          message: 'Phiên làm việc đã hết hạn hoặc chưa đăng nhập. Vui lòng đăng nhập lại.' 
+        });
       }
 
-      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET) as AuthenticatedUser;
 
-      if (!roles.includes(decoded.role)) {
-        return res.status(403).json({ message: 'Role không hợp lệ. Truy cập bị từ chối.' });
+      if (allowedRoles && allowedRoles.length > 0) {
+        if (!decoded.role || !allowedRoles.includes(decoded.role)) {
+          return res.status(403).json({ 
+            error: 'Forbidden', 
+            message: `Quyền truy cập bị từ chối. Tính năng này yêu cầu quyền: ${allowedRoles.join(', ')}.` 
+          });
+        }
       }
 
-      // Gán thông tin user vào request để các controller dùng
-      (req as any).user = decoded;
+      // Attach decoded user securely to the express request object
+      (req as AuthenticatedRequest).user = decoded;
       next();
-    } catch (error) {
-      return res.status(401).json({ message: 'Token hết hạn hoặc sai' });
+    } catch (error: any) {
+      return res.status(401).json({ 
+        error: 'InvalidToken', 
+        message: 'Token xác thực không hợp lệ hoặc đã hết hạn.' 
+      });
     }
   };
 };
 
-export default requireRole;
+export const requireRole = (roles: string[]) => requireAuth(roles as any);
+
+export default requireAuth;

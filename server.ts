@@ -1,14 +1,31 @@
 import express, { Request, Response } from 'express';
+import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 import { GoogleGenAI } from '@google/genai';
 import { THEORY_QUESTIONS } from './src/data/theoryQuestions.ts';
 import aiRoutes from './server/routes/aiRoutes.ts';
 import authRouter from './server/auth.js';
 import adminRoutes from './server/routes/adminRoutes.ts';
+import { fileGraderQueue } from './server/services/fileGraderQueue.ts';
+import { generateOfflineMosAnswer } from './server/services/aiFallbackService.ts';
+import { requireAuth } from './server/middleware/authMiddleware.ts';
+import { JWT_SECRET } from './server/config/jwt.ts';
+import { logger } from './server/config/logger.ts';
 
 dotenv.config();
+
+// Fisher-Yates unbiased shuffle algorithm (replaces biased sort with 0.5 - Math.random)
+function fisherYatesShuffle<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,7 +34,29 @@ const app = express();
 const PORT = process.env.NODE_ENV === 'production' && process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const HOST = '0.0.0.0';
 
+// Security Headers: Helmet protection against common web vulnerabilities
+app.use(helmet({
+  contentSecurityPolicy: false, // Allows Vite development & inline app scripts
+  crossOriginEmbedderPolicy: false,
+  frameguard: false, // Preserves AI Studio iFrame preview capability
+}));
+
 app.use(express.json());
+
+// Winston HTTP Request Logger Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    if (req.originalUrl.startsWith('/api')) {
+      const duration = Date.now() - start;
+      logger.info(`HTTP ${req.method} ${req.originalUrl} [${res.statusCode}] - ${duration}ms`, {
+        ip: req.ip,
+        statusCode: res.statusCode,
+      });
+    }
+  });
+  next();
+});
 
 // Mount modular Auth, Admin & AI Proxy routers
 app.use('/api/auth', authRouter);
@@ -78,7 +117,7 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
@@ -129,7 +168,7 @@ Hãy cung cấp:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
@@ -253,6 +292,11 @@ interface ActiveExamSession {
   questionIds: string[];
   violationsCount: number;
   antiCheatLogs: string[];
+  timeLeftSeconds?: number;
+  userAnswers?: Record<string, string>;
+  markedForReview?: Record<string, boolean>;
+  currentIndex?: number;
+  lastSavedAt?: number;
 }
 
 const activeExamSessions = new Map<string, ActiveExamSession>();
@@ -387,8 +431,8 @@ app.post('/api/exam/start', (req: Request, res: Response) => {
     }
     if (pool.length === 0) pool = THEORY_QUESTIONS;
 
-    // Shuffle and pick 15 questions (or up to pool size)
-    const shuffled = [...pool].sort(() => 0.5 - Math.random());
+    // Shuffle unbiasedly with Fisher-Yates algorithm and pick 15 questions
+    const shuffled = fisherYatesShuffle(pool);
     const selected = shuffled.slice(0, Math.min(15, shuffled.length));
     const sessionId = 'exam-ses-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
 
@@ -583,6 +627,114 @@ app.post('/api/exam/submit', (req: Request, res: Response) => {
   }
 });
 
+// Endpoint: Debounced Exam Auto-Save (anti-disconnection and F5 recovery)
+app.post('/api/exam/autosave', (req: Request, res: Response) => {
+  try {
+    const { sessionId, userAnswers, timeLeftSeconds, currentIndex, markedForReview } = req.body;
+    if (sessionId && activeExamSessions.has(sessionId)) {
+      const session = activeExamSessions.get(sessionId)!;
+      session.userAnswers = userAnswers || session.userAnswers || {};
+      session.timeLeftSeconds = typeof timeLeftSeconds === 'number' ? timeLeftSeconds : session.timeLeftSeconds;
+      (session as any).markedForReview = markedForReview || {};
+      (session as any).currentIndex = currentIndex || 0;
+      (session as any).lastSavedAt = Date.now();
+      activeExamSessions.set(sessionId, session);
+    }
+    return res.json({ 
+      success: true, 
+      savedAt: new Date().toLocaleTimeString('vi-VN'),
+      message: 'Đã tự động lưu bài thi vào bộ nhớ máy chủ an toàn.' 
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Lỗi autosave trên máy chủ.' });
+  }
+});
+
+// Endpoint: Check & Resume active exam session
+app.get('/api/exam/session/:sessionId', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const session = activeExamSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Không tìm thấy phiên làm bài đang hoạt động.' });
+  }
+  return res.json({
+    sessionId,
+    subject: session.subject,
+    studentName: session.studentName,
+    timeLeftSeconds: session.timeLeftSeconds,
+    userAnswers: session.userAnswers,
+    markedForReview: session.markedForReview || {},
+    currentIndex: session.currentIndex || 0,
+    questions: session.questionIds
+      .map(id => THEORY_QUESTIONS.find(q => q.id === id))
+      .filter((q): q is typeof THEORY_QUESTIONS[0] => Boolean(q))
+      .map(q => ({
+        id: q.id,
+        subject: q.subject,
+        domainId: q.domainId,
+        domainName: q.domainName,
+        difficulty: q.difficulty,
+        type: q.type,
+        title: q.title,
+        scenario: q.scenario,
+        options: q.options,
+        points: q.points,
+      })),
+  });
+});
+
+// Endpoint: Non-blocking File Grader Upload & Queue
+app.post('/api/grader/submit', (req: Request, res: Response) => {
+  try {
+    const { studentId, studentName, fileName, fileSize, subject, projectId, evaluationResult } = req.body;
+    if (!studentName || !subject) {
+      return res.status(400).json({ error: 'studentName và subject là bắt buộc.' });
+    }
+
+    if (evaluationResult) {
+      // Completed with client worker
+      const job = fileGraderQueue.completeClientEvaluatedJob({
+        studentId: studentId || 'student-auto',
+        studentName,
+        fileName: fileName || 'practice_file.xlsx',
+        fileSize: fileSize || 1024,
+        subject,
+        projectId: projectId || 'proj-1',
+        result: evaluationResult,
+      });
+      return res.status(201).json({ success: true, job });
+    }
+
+    const job = fileGraderQueue.createJob({
+      studentId: studentId || 'student-auto',
+      studentName,
+      fileName: fileName || 'practice_file.xlsx',
+      fileSize: fileSize || 1024,
+      subject,
+      projectId: projectId || 'proj-1',
+    });
+
+    return res.status(202).json({ 
+      success: true, 
+      jobId: job.id, 
+      status: job.status,
+      message: 'Tệp đã được đưa vào hàng đợi chấm điểm nền không làm nghẽn server.' 
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || 'Lỗi hàng đợi chấm bài.' });
+  }
+});
+
+// Endpoint: File Grader Status Poll
+app.get('/api/grader/status/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const job = fileGraderQueue.getJob(id);
+  if (!job) {
+    return res.status(404).json({ error: 'Không tìm thấy tác vụ chấm điểm này.' });
+  }
+  return res.json({ job });
+});
+
 // Endpoint: Submit exam/practice result from student
 app.post('/api/submissions', (req: Request, res: Response) => {
   try {
@@ -652,8 +804,8 @@ app.get('/api/submissions', (req: Request, res: Response) => {
   }
 });
 
-// Endpoint: Teacher adds feedback/grade for a submission
-app.post('/api/submissions/:id/feedback', (req: Request, res: Response) => {
+// Endpoint: Teacher adds feedback/grade for a submission (Requires Teacher or Admin JWT)
+app.post('/api/submissions/:id/feedback', requireAuth(['teacher', 'admin']), (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { feedback, rating } = req.body;
@@ -675,7 +827,7 @@ app.post('/api/submissions/:id/feedback', (req: Request, res: Response) => {
 });
 
 // ==========================================
-// OWNER TEACHER MANAGEMENT (CRUD)
+// OWNER TEACHER MANAGEMENT (CRUD - Admin Only)
 // ==========================================
 let teachersStore = [
   {
@@ -728,7 +880,7 @@ app.get('/api/teachers', (_req: Request, res: Response) => {
   return res.json({ teachers: teachersStore });
 });
 
-app.post('/api/teachers', (req: Request, res: Response) => {
+app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response) => {
   try {
     const data = req.body;
     if (!data.name || !data.email) {
@@ -753,7 +905,7 @@ app.post('/api/teachers', (req: Request, res: Response) => {
   }
 });
 
-app.put('/api/teachers/:id', (req: Request, res: Response) => {
+app.put('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Response) => {
   const { id } = req.params;
   const updates = req.body;
   const index = teachersStore.findIndex(t => t.id === id);
@@ -765,7 +917,7 @@ app.put('/api/teachers/:id', (req: Request, res: Response) => {
   return res.json({ success: true, teacher: teachersStore[index] });
 });
 
-app.delete('/api/teachers/:id', (req: Request, res: Response) => {
+app.delete('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Response) => {
   const { id } = req.params;
   const initialLen = teachersStore.length;
   teachersStore = teachersStore.filter(t => t.id !== id);
@@ -776,10 +928,10 @@ app.delete('/api/teachers/:id', (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Đã xóa giảng viên thành công.' });
 });
 
-// Endpoint: Protected Question Bank Proxy (Strips answers for students, reveals for teachers)
+// Endpoint: Protected Question Bank Proxy with Pagination (Strips answers for students, reveals for teachers verified by JWT)
 app.get('/api/questions', (req: Request, res: Response) => {
   try {
-    const { subject, domainId, role = 'student' } = req.query;
+    const { subject, domainId, page = '1', limit = '10' } = req.query;
 
     let pool = THEORY_QUESTIONS;
     if (subject && subject !== 'all') {
@@ -789,17 +941,39 @@ app.get('/api/questions', (req: Request, res: Response) => {
       pool = pool.filter(q => q.domainId === domainId);
     }
 
-    // Role-based data projection:
-    // Teachers/Admins get full questions including answers & explanations
-    if (role === 'teacher' || role === 'admin') {
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 10));
+    const total = pool.length;
+    const totalPages = Math.ceil(total / limitNum);
+    const startIndex = (pageNum - 1) * limitNum;
+    const paginated = pool.slice(startIndex, startIndex + limitNum);
+
+    // Verify privileged role strictly via JWT Authorization header (Eliminates query param bypass S-009)
+    let isPrivilegedRole = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        if (decoded?.role === 'teacher' || decoded?.role === 'admin') {
+          isPrivilegedRole = true;
+        }
+      } catch (e) {}
+    }
+
+    // Privileged teachers and admins get full questions including answers & explanations
+    if (isPrivilegedRole) {
       return res.json({
-        total: pool.length,
-        questions: pool,
+        total,
+        page: pageNum,
+        totalPages,
+        limit: limitNum,
+        questions: paginated,
       });
     }
 
     // Students get sanitized questions only - zero sensitive keys sent over the wire!
-    const sanitized = pool.map(q => ({
+    const sanitized = paginated.map(q => ({
       id: q.id,
       subject: q.subject,
       domainId: q.domainId,
@@ -813,11 +987,51 @@ app.get('/api/questions', (req: Request, res: Response) => {
     }));
 
     return res.json({
-      total: sanitized.length,
+      total,
+      page: pageNum,
+      totalPages,
+      limit: limitNum,
       questions: sanitized,
     });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || 'Lỗi truy vấn ngân hàng câu hỏi.' });
+  }
+});
+
+// Endpoint: Evaluate submitted answers securely on server
+app.post('/api/questions/submit', (req: Request, res: Response) => {
+  try {
+    const { answers } = req.body; // Record<string, string>
+    if (!answers || typeof answers !== 'object') {
+      return res.status(400).json({ error: 'answers object is required.' });
+    }
+
+    let correctCount = 0;
+    const totalAnswered = Object.keys(answers).length;
+    const results: Record<string, { isCorrect: boolean; correctAnswer: string; explanation: string; officialRibbonPath: string }> = {};
+
+    for (const [qId, userAns] of Object.entries(answers)) {
+      const q = THEORY_QUESTIONS.find(item => item.id === qId);
+      if (q) {
+        const isCorrect = q.correctAnswer === userAns;
+        if (isCorrect) correctCount += 1;
+        results[qId] = {
+          isCorrect,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+          officialRibbonPath: q.officialRibbonPath,
+        };
+      }
+    }
+
+    return res.json({
+      totalAnswered,
+      correctCount,
+      scorePercentage: totalAnswered > 0 ? Math.round((correctCount / totalAnswered) * 100) : 0,
+      results,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || 'Lỗi chấm điểm bài thi.' });
   }
 });
 
@@ -889,11 +1103,11 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, HOST, () => {
-    console.log(`Server is running on http://${HOST}:${PORT}`);
+    logger.info(`Server is running on http://${HOST}:${PORT} [Environment: ${process.env.NODE_ENV || 'development'}]`);
   });
 
   const shutdown = () => {
-    console.log('Shutting down server gracefully...');
+    logger.info('Shutting down server gracefully...');
     server.close(() => {
       process.exit(0);
     });

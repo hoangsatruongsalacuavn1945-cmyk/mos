@@ -76,7 +76,26 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [credits, setCredits] = useState<{ remaining: number | 'unlimited'; max: number | 'unlimited'; used: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchCredits = async () => {
+    try {
+      const res = await fetch('/api/gemini/credits');
+      if (res.ok) {
+        const data = await res.json();
+        setCredits({
+          remaining: data.remainingCredits,
+          max: data.maxQuota,
+          used: data.usedToday,
+        });
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchCredits();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,6 +108,10 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputValue).trim();
     if (!text || isLoading) return;
+
+    if (credits && credits.remaining === 0) {
+      return;
+    }
 
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
@@ -115,7 +138,7 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Lỗi kết nối AI');
+        throw new Error(data.message || data.error || 'Lỗi kết nối AI');
       }
 
       const assistantMessage: Message = {
@@ -126,14 +149,16 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      fetchCredits();
     } catch (error: any) {
       const errorMessage: Message = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
-        content: `⚠️ **Không thể kết nối**: ${error.message || 'Vui lòng kiểm tra kết nối mạng hoặc thử lại sau.'}`,
+        content: `⚠️ **Không thể hoàn tất**: ${error.message || 'Vui lòng thử lại sau.'}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages(prev => [...prev, errorMessage]);
+      fetchCredits();
     } finally {
       setIsLoading(false);
     }
@@ -178,13 +203,34 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
           </p>
         </div>
 
-        <button
-          onClick={handleResetChat}
-          className="self-start md:self-auto px-3 py-2 bg-blue-800/80 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-blue-700"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Làm mới hội thoại</span>
-        </button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 self-start md:self-auto">
+          {credits && (
+            <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-2xs ${
+              credits.remaining === 'unlimited'
+                ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                : credits.remaining > 5
+                ? 'bg-blue-950/80 border-blue-500/40 text-blue-200'
+                : credits.remaining > 0
+                ? 'bg-amber-950/80 border-amber-500/40 text-amber-300'
+                : 'bg-red-950/80 border-red-500/40 text-red-300'
+            }`}>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>
+                {credits.remaining === 'unlimited'
+                  ? 'Hạn mức: Vô hạn (Giảng viên)'
+                  : `Hạn mức hôm nay: ${credits.remaining}/${credits.max} lượt`}
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={handleResetChat}
+            className="px-3 py-1.5 bg-blue-800/80 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-blue-700 cursor-pointer shadow-2xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Làm mới hội thoại</span>
+          </button>
+        </div>
       </div>
 
       {/* Quick Prompts Bar */}
@@ -294,6 +340,13 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
 
         {/* Input Bar */}
         <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200">
+          {credits && credits.remaining === 0 && (
+            <div className="mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-semibold flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Bạn đã sử dụng hết 20/20 lượt hỏi AI hôm nay. Hãy tiếp tục ôn tập theo ngân hàng câu hỏi và quay lại vào ngày mai nhé!</span>
+            </div>
+          )}
+
           <form
             onSubmit={e => {
               e.preventDefault();
@@ -303,16 +356,20 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
           >
             <input
               type="text"
-              placeholder={`Đặt câu hỏi về ${selectedSubject === 'all' ? 'Word, Excel, PowerPoint' : selectedSubject.toUpperCase()}... (Ví dụ: cú pháp hàm XLOOKUP, cách ngắt section...)`}
+              placeholder={
+                credits && credits.remaining === 0
+                  ? 'Đã hết lượt hỏi hôm nay (Đặt lại vào 00:00 ngày mai)...'
+                  : `Đặt câu hỏi về ${selectedSubject === 'all' ? 'Word, Excel, PowerPoint' : selectedSubject.toUpperCase()}... (Ví dụ: cú pháp hàm XLOOKUP, cách ngắt section...)`
+              }
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
-              disabled={isLoading}
-              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              disabled={isLoading || (credits ? credits.remaining === 0 : false)}
+              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
             />
 
             <button
               type="submit"
-              disabled={!inputValue.trim() || isLoading}
+              disabled={!inputValue.trim() || isLoading || (credits ? credits.remaining === 0 : false)}
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-colors shadow-xs flex items-center gap-1.5 shrink-0"
             >
               <span>Gửi</span>

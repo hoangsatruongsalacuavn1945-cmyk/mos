@@ -19,6 +19,7 @@ import {
 import { UserProfile } from '../types/user';
 import { sendSubmissionToTeacher } from '../utils/userStore';
 import { soundManager } from '../utils/audio';
+import { gradeFileInWorker } from '../services/fileGraderWorkerService';
 
 interface GraderTask {
   id: string;
@@ -295,6 +296,7 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
     }>;
   } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [workerStatus, setWorkerStatus] = useState<{ stage: string; progress: number; message: string } | null>(null);
   const [submittedToTeacher, setSubmittedToTeacher] = useState(false);
 
   const activeProject = MOS_PROJECTS.find(p => p.id === selectedProjectId) || MOS_PROJECTS[0];
@@ -306,8 +308,8 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
     XLSX.writeFile(wb, activeProject.starterFileName);
   };
 
-  // Upload and Grade File
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload and Grade File using non-blocking Web Worker
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -315,14 +317,48 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
     setIsProcessing(true);
     setUploadedFileName(file.name);
     setSubmittedToTeacher(false);
+    setWorkerStatus({ stage: 'starting', progress: 10, message: 'Đang khởi chạy luồng nền Web Worker...' });
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
+    try {
+      // Execute in Web Worker background thread
+      const result = await gradeFileInWorker(file, selectedProjectId, (status) => {
+        setWorkerStatus(status);
+      });
+
+      if (result.passed) {
+        soundManager.playCorrect();
+      } else {
+        soundManager.playWrong();
+      }
+
+      setGradingResults({
+        score: result.score,
+        passed: result.passed,
+        taskBreakdown: result.taskBreakdown,
+      });
+
+      // Also notify backend queue asynchronously
       try {
-        const data = new Uint8Array(event.target?.result as ArrayBuffer);
-        // Important: Enable cellFormula and cellNF to inspect Excel formulas and number formats
+        await fetch('/api/grader/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId: currentUser.id,
+            studentName: currentUser.name,
+            fileName: file.name,
+            fileSize: file.size,
+            subject: 'excel',
+            projectId: selectedProjectId,
+            evaluationResult: result,
+          }),
+        });
+      } catch {}
+    } catch (err: any) {
+      console.error('Error grading file in Web Worker:', err);
+      // Fallback: synchronous fallback if worker environment fails
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
         const wb = XLSX.read(data, { type: 'array', cellFormula: true, cellStyles: true, cellNF: true });
-
         const taskBreakdown = activeProject.tasks.map(task => {
           const evalResult = task.evaluate(wb);
           return {
@@ -336,30 +372,19 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
             actualValue: evalResult.actualValue,
           };
         });
-
         const totalEarned = taskBreakdown.reduce((sum, t) => sum + t.points, 0);
-        const passed = totalEarned >= 700;
-
-        if (passed) {
-          soundManager.playCorrect();
-        } else {
-          soundManager.playWrong();
-        }
-
         setGradingResults({
           score: totalEarned,
-          passed,
+          passed: totalEarned >= 700,
           taskBreakdown,
         });
-      } catch (err: any) {
-        console.error('Error parsing file:', err);
+      } catch (fallbackErr: any) {
         alert('Không thể đọc file bài làm. Vui lòng đảm bảo bạn tải lên file .xlsx chuẩn Microsoft Excel.');
-      } finally {
-        setIsProcessing(false);
       }
-    };
-
-    reader.readAsArrayBuffer(file);
+    } finally {
+      setIsProcessing(false);
+      setWorkerStatus(null);
+    }
   };
 
   // Submit to Teacher Portal
@@ -500,6 +525,32 @@ export const RealFileGrader: React.FC<RealFileGraderProps> = ({ currentUser, onS
           </label>
         </div>
       </div>
+
+      {/* Web Worker Background Processing Card */}
+      {isProcessing && workerStatus && (
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white rounded-2xl p-5 border border-blue-700 shadow-md animate-fadeIn">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-300">
+                Web Worker Nền Đang Xử Lý · Giao Diện Không Bị Đơ
+              </span>
+            </div>
+            <span className="text-xs font-black text-emerald-400">{workerStatus.progress}%</span>
+          </div>
+
+          <p className="text-xs text-blue-100 font-medium mb-3">
+            {workerStatus.message}
+          </p>
+
+          <div className="w-full bg-blue-950/60 rounded-full h-2 overflow-hidden border border-blue-700/50">
+            <div 
+              className="bg-gradient-to-r from-blue-400 to-emerald-400 h-full rounded-full transition-all duration-300"
+              style={{ width: `${workerStatus.progress}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Grading Results Panel (Error Breakdown & Certiport Score) */}
       {gradingResults && (

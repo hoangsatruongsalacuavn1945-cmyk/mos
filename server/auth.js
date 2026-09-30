@@ -13,18 +13,19 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import User from './models/User.ts';
 import { userService } from './services/userService.ts';
+import { JWT_SECRET, JWT_EXPIRES_IN, getSafeJwtExpiresIn } from './config/jwt.ts';
+import { logger, auditLogger } from './config/logger.ts';
 
 dotenv.config();
 
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mos_master_secure_jwt_secret_key_2026_certiport';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d';
-
 /**
  * Helper: Sign JWT token
  */
 function generateToken(userPayload) {
+  const expiresIn = getSafeJwtExpiresIn();
+
   return jwt.sign(
     {
       id: userPayload.id || userPayload._id,
@@ -36,7 +37,7 @@ function generateToken(userPayload) {
       classRoom: userPayload.classRoom,
     },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
+    { expiresIn }
   );
 }
 
@@ -109,6 +110,12 @@ router.post('/register', async (req, res) => {
     // Check if email already exists
     const existing = await User.findOne({ email: cleanEmail });
     if (existing) {
+      auditLogger.logAuthAttempt({
+        event: 'REGISTER_FAILURE',
+        email: cleanEmail,
+        ip: req.ip,
+        reason: 'Email already exists',
+      });
       return res.status(400).json({ message: 'Email đã tồn tại trong hệ thống' });
     }
 
@@ -130,6 +137,14 @@ router.post('/register', async (req, res) => {
     });
 
     await newUser.save();
+
+    auditLogger.logAuthAttempt({
+      event: 'REGISTER_SUCCESS',
+      email: newUser.email,
+      role: newUser.role,
+      userId: newUser.id,
+      ip: req.ip,
+    });
 
     const token = generateToken({
       id: newUser.id,
@@ -187,49 +202,81 @@ router.post('/login', async (req, res) => {
     // 1. Tìm user theo email
     const user = await User.findOne({ email: cleanEmail });
     if (!user) {
+      auditLogger.logAuthAttempt({
+        event: 'LOGIN_FAILURE',
+        email: cleanEmail,
+        ip: req.ip,
+        reason: 'User not found',
+      });
       return res.status(400).json({ message: 'Email hoặc mật khẩu không đúng!' });
     }
 
     // Kiểm tra trạng thái tài khoản
     if (user.status === 'suspended') {
+      auditLogger.logAuthAttempt({
+        event: 'LOGIN_FAILURE',
+        email: cleanEmail,
+        userId: user.id,
+        ip: req.ip,
+        reason: 'Account suspended',
+      });
       return res.status(403).json({ message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ ban quản trị.' });
     }
 
-    // 2. So sánh mật khẩu bằng bcrypt hoặc master passkey
+    // 2. So sánh mật khẩu an toàn bằng bcrypt (Không có backdoor, không so sánh plaintext S-001, S-002, S-003)
     let isMatch = false;
-    try {
-      if (user.password_hash) {
-        isMatch = await bcrypt.compare(password, user.password_hash);
-      }
-    } catch (e) {
-      isMatch = false;
+    let passwordHash = user.password_hash;
+
+    if (!passwordHash && user.password && user.password.startsWith('$2')) {
+      passwordHash = user.password;
     }
 
-    // Cho phép passkey cho tài khoản Super Admin hoặc mật khẩu demo '123456'
-    if (!isMatch) {
-      if (cleanEmail === 'hoangsatruongsalacuavn1945@gmail.com' && password === 'MOS_MASTER_OWNER_2026!') {
-        isMatch = true;
-      } else if (password === user.password || password === '123456') {
-        isMatch = true;
+    if (passwordHash) {
+      try {
+        isMatch = await bcrypt.compare(password, passwordHash);
+      } catch (e) {
+        isMatch = false;
+      }
+    } else if (user.password) {
+      // Automatic security migration: Upgrade any legacy plaintext password to secure bcrypt hash
+      try {
+        const legacyMatch = (password === user.password);
+        if (legacyMatch) {
+          const salt = await bcrypt.genSalt(10);
+          const newHash = await bcrypt.hash(password, salt);
+          user.password_hash = newHash;
+          user.password = newHash;
+          await user.save();
+          isMatch = true;
+        }
+      } catch (migrationErr) {
+        logger.error('[Auth Security] Failed to migrate legacy password:', migrationErr);
       }
     }
 
     if (!isMatch) {
+      auditLogger.logAuthAttempt({
+        event: 'LOGIN_FAILURE',
+        email: cleanEmail,
+        userId: user.id,
+        role: user.role,
+        ip: req.ip,
+        reason: 'Invalid credentials',
+      });
       return res.status(400).json({ message: 'Email hoặc mật khẩu không đúng!' });
     }
 
-    // 3. Tạo JWT Token (Để bảo mật các request sau này, thời hạn 1 ngày)
-    const token = jwt.sign(
-      {
-        id: user._id || user.id,
-        role: user.role,
-        email: user.email,
-        name: user.fullName || user.name,
-        fullName: user.fullName || user.name,
-      },
-      process.env.JWT_SECRET || 'fallback_secret_key',
-      { expiresIn: '1d' }
-    );
+    // Ghi nhận Audit Trail đăng nhập thành công
+    auditLogger.logAuthAttempt({
+      event: 'LOGIN_SUCCESS',
+      email: user.email,
+      userId: user.id,
+      role: user.role,
+      ip: req.ip,
+    });
+
+    // 3. Tạo JWT Token bảo mật bằng generateToken với JWT_SECRET thống nhất
+    const token = generateToken(user);
 
     const masterGoogleSheetUrl = process.env.GOOGLE_SHEETS_MASTER_URL || 
       'https://docs.google.com/spreadsheets/d/1MOSMaster_Certiport_HocVien_Central_2026';
@@ -300,6 +347,14 @@ router.get('/me', verifyToken, async (req, res) => {
 router.post('/quick-login', async (req, res) => {
   try {
     const { name, email, role = 'student', studentCode, classRoom, assignedTeacherId } = req.body;
+
+    // Disallow arbitrary admin elevation through quick-login endpoint
+    if (role === 'admin') {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'Tài khoản Quản Trị Viên (Admin) không được tạo hoặc đăng nhập qua quick-login. Vui lòng sử dụng /api/auth/login với thông tin bảo mật.' 
+      });
+    }
 
     const cleanEmail = (email || `${studentCode || 'user'}@mosmaster.edu.vn`).toLowerCase();
     let existing = await User.findOne({ email: cleanEmail });
