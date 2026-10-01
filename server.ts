@@ -9,6 +9,10 @@ import { THEORY_QUESTIONS } from './src/data/theoryQuestions.ts';
 import aiRoutes from './server/routes/aiRoutes.ts';
 import authRouter from './server/auth.js';
 import adminRoutes from './server/routes/adminRoutes.ts';
+import logRoutes from './server/routes/logRoutes.ts';
+import feedbackRoutes from './server/routes/feedbackRoutes.ts';
+import { createMasteryRouter } from './server/routes/masteryRoutes.ts';
+import offlineRoutes from './server/routes/offlineRoutes.ts';
 import { fileGraderQueue } from './server/services/fileGraderQueue.ts';
 import { generateOfflineMosAnswer } from './server/services/aiFallbackService.ts';
 import { requireAuth } from './server/middleware/authMiddleware.ts';
@@ -78,6 +82,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/gemini', aiRoutes);
+app.use('/api/logs', logRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/mastery', createMasteryRouter(() => submissionsStore));
+app.use('/api/offline', offlineRoutes);
+
+// Explicit Service Worker Route with Root Scope Allowance Header
+app.get('/sw.js', (_req: Request, res: Response) => {
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
 
 // ==========================================
 // TEACHER & STUDENT SUBMISSIONS MANAGEMENT

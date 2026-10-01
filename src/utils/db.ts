@@ -110,8 +110,8 @@ export class DatabaseConnectionManager {
   public async checkHealth(): Promise<{ status: 'healthy' | 'degraded' | 'offline'; latencyMs: number; error?: string }> {
     const start = performance.now();
     try {
-      // In web/SPA client mode, probes the server proxy /api/health or performs ping query
-      const res = await fetch('/api/questions?role=student&limit=1', { method: 'GET' });
+      // In web/SPA client mode, probes the server health endpoint /api/health
+      const res = await fetch('/api/health', { method: 'GET' });
       const latencyMs = Math.round(performance.now() - start);
       if (res.ok) {
         return { status: 'healthy', latencyMs };

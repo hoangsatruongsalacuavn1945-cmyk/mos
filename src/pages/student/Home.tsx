@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TheoryQuiz } from '../../components/TheoryQuiz';
 import { PracticalSimulator } from '../../components/PracticalSimulator';
@@ -17,37 +17,56 @@ import { LeaderboardModal } from '../../components/LeaderboardModal';
 import { MOSCertificateModal } from '../../components/MOSCertificateModal';
 import { SupervisorReportModal } from '../../components/SupervisorReportModal';
 import { GoogleSheetsBackupModal } from '../../components/GoogleSheetsBackupModal';
+import { FeedbackModal } from '../../components/FeedbackModal';
+import { MasteryProgressDashboard } from '../../components/dashboard/MasteryProgressDashboard';
+import { OfflineStudyManagerModal } from '../../components/offline/OfflineStudyManagerModal';
+import { useOfflineSync } from '../../hooks/useOfflineSync';
 import { MOSSubject, UserStats } from '../../types/mos';
 import { loadUserStats } from '../../utils/storage';
 import { useAuthStore } from '../../utils/userStore';
 import { soundManager } from '../../utils/audio';
 import { 
-  Award, 
+  BarChart3, 
   BookOpen, 
   Monitor, 
   Keyboard, 
-  BarChart2, 
   CheckCircle2, 
   Clock, 
   Sparkles, 
   Bot, 
-  Mail, 
   Trophy, 
   GraduationCap, 
   FileSpreadsheet, 
   ShieldCheck, 
-  Crown,
-  Laptop
+  PenTool,
+  Wrench,
+  Layers,
+  ArrowRight,
+  Flame,
+  FileCheck,
+  Award,
+  MessageSquarePlus,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
-export type StudentNavTab = 'hub' | 'leaderboard' | 'progress-charts' | 'quiz-engine' | 'theory' | 'practical' | 'file-grader' | 'roadmap' | 'shortcuts' | 'analytics' | 'ai-tutor' | 'ai-practice';
+// 4 Cohesive Workspaces grouping all related features together
+export type MainWorkspace = 'overview' | 'exam_practice' | 'ai_roadmap' | 'tools';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
   const { user, role } = useAuthStore();
-  const [currentTab, setCurrentTab] = useState<StudentNavTab>('theory');
   const [selectedSubject, setSelectedSubject] = useState<MOSSubject>('all');
   const [stats, setStats] = useState<UserStats>(loadUserStats());
+
+  // Main workspace state
+  const [activeWorkspace, setActiveWorkspace] = useState<MainWorkspace>('overview');
+
+  // Sub-tabs for each workspace (keeps UI compact, prevents scroll fatigue)
+  const [overviewSubTab, setOverviewSubTab] = useState<'hub' | 'charts' | 'leaderboard'>('hub');
+  const [practiceSubTab, setPracticeSubTab] = useState<'exam_center' | 'quiz_engine' | 'ribbon_simulator' | 'file_grader' | 'theory'>('exam_center');
+  const [aiSubTab, setAiSubTab] = useState<'roadmap' | 'ai_tutor' | 'ai_practice'>('roadmap');
+  const [toolsSubTab, setToolsSubTab] = useState<'shortcuts' | 'analytics' | 'sheets_backup'>('shortcuts');
 
   // Modals
   const [isSystemCheckOpen, setIsSystemCheckOpen] = useState(false);
@@ -55,6 +74,10 @@ export const Home: React.FC = () => {
   const [isCertificateOpen, setIsCertificateOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [isOfflineManagerOpen, setIsOfflineManagerOpen] = useState(false);
+
+  const { isOnline, status: offlineStatus } = useOfflineSync();
   const [certificateInfo, setCertificateInfo] = useState<{ subject: string; score: number }>({
     subject: 'excel',
     score: 850,
@@ -73,339 +96,589 @@ export const Home: React.FC = () => {
     setIsCertificateOpen(true);
   };
 
+  const totalExamsPassed = stats.examHistory ? stats.examHistory.filter(e => e.passed).length : 0;
+
   return (
-    <div className="flex flex-col">
-      {/* Subject Filter & Quick Navigation Bar */}
-      <div className="bg-white border-b border-slate-200 py-3.5 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+    <div className="flex flex-col min-h-screen bg-slate-50/50">
+      {/* ========================================================================= */}
+      {/* COMPACT STICKY CONTROL BAR: SUBJECT SWITCHER + LIVE BADGES + CTAS */}
+      {/* ========================================================================= */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
           
-          {/* Subject Pills */}
+          {/* Left: Program Branding & Subject Filter */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-xs shrink-0">
-              <GraduationCap className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center font-bold text-white shadow-xs shrink-0">
+              <GraduationCap className="w-5 h-5 text-white" />
             </div>
+
             <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
-                <span>Khảo Thí Chuẩn Quốc Tế MOS 365 / 2019</span>
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
+                <span className="text-blue-600 font-bold uppercase tracking-wider">MOS Certiport 365/2019</span>
                 <span>·</span>
-                <span className="text-blue-600 font-semibold">IIG & Certiport</span>
-                <span>·</span>
-                <span>Thang điểm 1000 (Đạt ≥ 700)</span>
+                <span>Thang Điểm 1000 (Đạt ≥ 700)</span>
               </div>
-              <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight mt-0.5">
-                {selectedSubject === 'word'
-                  ? 'MOS Word Associate (MO-100) - Soạn Thảo & Định Dạng Tài Liệu'
-                  : selectedSubject === 'excel'
-                  ? 'MOS Excel Associate (MO-200) - Phân Tích Dữ Liệu & Làm Chủ Hàm'
-                  : selectedSubject === 'powerpoint'
-                  ? 'MOS PowerPoint Associate (MO-300) - Thiết Kế & Hiệu Ứng Trình Chiếu'
-                  : 'MOS Master - Luyện Thi Chứng Chỉ Tin Học Quốc Tế Toàn Diện'}
-              </h1>
+
+              {/* Subject Selector Buttons */}
+              <div className="flex items-center gap-1 mt-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                {(['all', 'word', 'excel', 'powerpoint'] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      soundManager.playClick();
+                      setSelectedSubject(s);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all capitalize cursor-pointer ${
+                      selectedSubject === s 
+                        ? 'bg-white text-blue-700 shadow-xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {s === 'all' ? 'Tất cả 3 môn' : s === 'powerpoint' ? 'PowerPoint' : s}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-            {/* Subject Selector Buttons */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
-              {(['all', 'word', 'excel', 'powerpoint'] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    soundManager.playClick();
-                    setSelectedSubject(s);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg transition-all capitalize cursor-pointer ${
-                    selectedSubject === s ? 'bg-white text-blue-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {s === 'all' ? 'Tất cả' : s}
-                </button>
-              ))}
+          {/* Right: Quick Action Badges & Primary CTA */}
+          <div className="flex items-center gap-2 flex-wrap self-end md:self-auto">
+            {/* Streak & Status Badges */}
+            <div className="hidden sm:flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs">
+              <span className="flex items-center gap-1 font-bold text-orange-600">
+                <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
+                {stats.streakDays || 1} ngày
+              </span>
+              <span className="text-slate-300">|</span>
+              <span className="text-slate-600 font-medium">
+                Đạt <strong className="text-emerald-600">{totalExamsPassed}/3</strong> môn
+              </span>
             </div>
 
+            {/* System Check button */}
             <button
               onClick={() => {
                 soundManager.playClick();
                 setIsSystemCheckOpen(true);
               }}
-              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="Kiểm tra tương thích phòng thi (màn hình, mạng)"
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+              title="Kiểm tra hệ thống máy thi"
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-              <span>Kiểm Tra Máy Thi</span>
+              <span>Kiểm Tra Máy</span>
             </button>
 
+            {/* Offline Study Center (Service Worker Caching) */}
             <button
               onClick={() => {
                 soundManager.playClick();
-                setIsLeaderboardOpen(true);
+                setIsOfflineManagerOpen(true);
               }}
-              className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="Bảng vàng vinh danh điểm cao"
+              className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                !isOnline
+                  ? 'bg-amber-500 text-white animate-pulse'
+                  : offlineStatus.activeCacheCount > 0
+                  ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              }`}
+              title="Quản lý bộ đề thi và tài liệu học ngoại tuyến qua Service Worker Cache"
             >
-              <Trophy className="w-3.5 h-3.5 text-amber-500" />
-              <span>Bảng Vàng</span>
+              {!isOnline ? (
+                <>
+                  <WifiOff className="w-3.5 h-3.5" />
+                  <span>Học Offline (Đang Mất Mạng)</span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>
+                    Học Ngoại Tuyến {offlineStatus.activeCacheCount > 0 ? `(${offlineStatus.activeCacheCount} gói)` : ''}
+                  </span>
+                </>
+              )}
             </button>
 
+            {/* Owner Feedback & Web Rating button */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setIsFeedbackOpen(true);
+              }}
+              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+              title="Góp ý cho chủ sở hữu, đánh giá website hoặc báo lỗi khuất màn hình máy thi"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5 text-amber-600" />
+              <span>Góp Ý & Báo Lỗi</span>
+            </button>
+
+            {/* Sheets Backup & Dual-Write button (Teachers/Admins) */}
             {(role === 'admin' || role === 'teacher') && (
               <button
                 onClick={() => {
                   soundManager.playClick();
                   setIsSheetsModalOpen(true);
                 }}
-                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                title="Quản trị dữ liệu Google Sheets (Chỉ Giáo viên & Ban Quản trị)"
+                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Sao lưu & Đồng bộ 8 bảng dữ liệu liên kết trên Google Sheets"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Sao Lưu Google Sheets</span>
+                <span>Google Sheets</span>
               </button>
             )}
 
+            {/* Primary CTA: Vào Phòng Thi Thử 50 Phút */}
             <button
               onClick={() => {
                 soundManager.playClick();
-                navigate('/thi-thu');
+                navigate(`/thi-thu?subject=${selectedSubject === 'all' ? 'excel' : selectedSubject}`);
               }}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>Vào Thi Thử 50 Phút</span>
+              <span>Vào Thi Thử 50P</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Navigation Sub-Tabs */}
+      {/* ========================================================================= */}
+      {/* 4 COHESIVE WORKSPACE TABS: GỘP TẤT CẢ TÍNH NĂNG LIÊN QUAN LẠI */}
+      {/* ========================================================================= */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex items-center gap-1 overflow-x-auto py-2 text-xs">
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('hub'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'hub' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>Trung Tâm Học Tập (Hub)</span>
-          </button>
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 overflow-x-auto py-2">
+          
+          <div className="flex items-center gap-2">
+            {/* WORKSPACE 1: TỔNG QUAN & TIẾN ĐỘ */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setActiveWorkspace('overview');
+              }}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                activeWorkspace === 'overview'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>1. Tổng Quan & Tiến Độ</span>
+            </button>
 
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('leaderboard'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'leaderboard' ? 'bg-amber-500 text-slate-950 font-black shadow-xs' : 'text-amber-700 hover:bg-amber-50'
-            }`}
-          >
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <span>Bảng Xếp Hạng Tiến Độ</span>
-          </button>
+            {/* WORKSPACE 2: KHẢO THÍ & THỰC HÀNH */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setActiveWorkspace('exam_practice');
+              }}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                activeWorkspace === 'exam_practice'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <PenTool className="w-4 h-4" />
+              <span>2. Khảo Thí & Thực Hành</span>
+            </button>
 
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('progress-charts'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'progress-charts' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <BarChart2 className="w-4 h-4 text-indigo-400" />
-            <span>Biểu Đồ Tiến Độ (Recharts)</span>
-          </button>
+            {/* WORKSPACE 3: TRÍ TUỆ NHÂN TẠO & LỘ TRÌNH */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setActiveWorkspace('ai_roadmap');
+              }}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                activeWorkspace === 'ai_roadmap'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Bot className="w-4 h-4" />
+              <span>3. Trợ Lý AI & Lộ Trình</span>
+            </button>
 
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('quiz-engine'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'quiz-engine' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Khảo Thí Quiz Engine (Firestore)</span>
-          </button>
+            {/* WORKSPACE 4: CÔNG CỤ & TRA CỨU */}
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setActiveWorkspace('tools');
+              }}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                activeWorkspace === 'tools'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Wrench className="w-4 h-4" />
+              <span>4. Công Cụ & Sổ Tay</span>
+            </button>
+          </div>
 
+          {/* Quick certificate trigger */}
           <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('theory'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'theory' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
-            }`}
+            onClick={() => handleOpenCertificate()}
+            className="hidden lg:flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
           >
-            <BookOpen className="w-4 h-4" />
-            <span>Trắc Nghiệm Lý Thuyết</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('practical'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'practical' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Monitor className="w-4 h-4" />
-            <span>Thao Tác Thực Hành (Projects)</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('file-grader'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'file-grader' ? 'bg-emerald-50 text-emerald-700' : 'text-emerald-800 hover:bg-emerald-50/50'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-            <span>Chấm File Tự Động (.xlsx / .docx)</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('roadmap'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'roadmap' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            <span>Lộ Trình Cá Nhân Hóa</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('ai-tutor'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'ai-tutor' ? 'bg-indigo-50 text-indigo-700' : 'text-indigo-600 hover:bg-indigo-50/50'
-            }`}
-          >
-            <Bot className="w-4 h-4 text-indigo-600" />
-            <span>Gia Sư AI Trợ Giảng</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('ai-practice'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'ai-practice' ? 'bg-purple-50 text-purple-700' : 'text-purple-600 hover:bg-purple-50/50'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-purple-600" />
-            <span>AI Tạo Đề Tùy Biến</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('shortcuts'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'shortcuts' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Keyboard className="w-4 h-4" />
-            <span>Phím Tắt Vàng</span>
-          </button>
-
-          <button
-            onClick={() => { soundManager.playClick(); setCurrentTab('analytics'); }}
-            className={`px-3 py-2 font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 cursor-pointer ${
-              currentTab === 'analytics' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <BarChart2 className="w-4 h-4" />
-            <span>Phân Tích Năng Lực</span>
+            <Award className="w-3.5 h-3.5 text-amber-600" />
+            <span>Chứng Chỉ Số MOS</span>
           </button>
         </div>
       </div>
 
-      {/* Tab Panels */}
-      <div className="py-6">
-        {currentTab === 'hub' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <Dashboard 
-              onSelectSubject={(sub) => setSelectedSubject(sub)}
-              onSelectTab={(tab) => setCurrentTab(tab as StudentNavTab)}
-              onStartExam={(sub) => navigate(`/thi-thu?subject=${sub || 'excel'}`)}
-            />
-          </div>
-        )}
+      {/* ========================================================================= */}
+      {/* SUB-NAVIGATION PILLS: CHUYỂN TỨC THÌ, KHÔNG CUỘN TRANG */}
+      {/* ========================================================================= */}
+      <div className="bg-slate-100/80 border-b border-slate-200/80 py-2 px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto text-xs">
+          
+          {/* Workspace 1 Sub-tabs */}
+          {activeWorkspace === 'overview' && (
+            <>
+              <button
+                onClick={() => { soundManager.playClick(); setOverviewSubTab('hub'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  overviewSubTab === 'hub' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Dashboard 3 Môn Học
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setOverviewSubTab('charts'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  overviewSubTab === 'charts' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Biểu Đồ Hiệu Suất Recharts
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setOverviewSubTab('leaderboard'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  overviewSubTab === 'leaderboard' ? 'bg-white text-amber-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Bảng Vàng Thi Đua
+              </button>
+            </>
+          )}
 
-        {currentTab === 'leaderboard' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <Leaderboard 
-              onSelectAction={(action, subject) => {
-                if (action === 'study') {
-                  setCurrentTab('theory');
-                } else {
-                  navigate(`/thi-thu?subject=${subject || 'excel'}`);
-                }
-              }}
-            />
-          </div>
-        )}
+          {/* Workspace 2 Sub-tabs */}
+          {activeWorkspace === 'exam_practice' && (
+            <>
+              <button
+                onClick={() => { soundManager.playClick(); setPracticeSubTab('exam_center'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  practiceSubTab === 'exam_center' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Cổng Khảo Thí 50 Phút
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setPracticeSubTab('quiz_engine'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  practiceSubTab === 'quiz_engine' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Trắc Nghiệm Firestore Quiz
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setPracticeSubTab('ribbon_simulator'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  practiceSubTab === 'ribbon_simulator' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Thực Hành Ribbon 1000 Tasks
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setPracticeSubTab('file_grader'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  practiceSubTab === 'file_grader' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Chấm File Tự Động (.xlsx / .docx)
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setPracticeSubTab('theory'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  practiceSubTab === 'theory' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Ngân Hàng Câu Hỏi Lý Thuyết
+              </button>
+            </>
+          )}
 
-        {currentTab === 'progress-charts' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <ProgressDashboard />
-          </div>
-        )}
+          {/* Workspace 3 Sub-tabs */}
+          {activeWorkspace === 'ai_roadmap' && (
+            <>
+              <button
+                onClick={() => { soundManager.playClick(); setAiSubTab('roadmap'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  aiSubTab === 'roadmap' ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Lộ Trình Cá Nhân Hóa
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setAiSubTab('ai_tutor'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  aiSubTab === 'ai_tutor' ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Gia Sư Trợ Giảng AI
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setAiSubTab('ai_practice'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  aiSubTab === 'ai_practice' ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                AI Tạo Đề Tùy Biến
+              </button>
+            </>
+          )}
 
-        {currentTab === 'quiz-engine' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <QuizEngine initialSubject={selectedSubject === 'all' ? 'excel' : selectedSubject} />
-          </div>
-        )}
+          {/* Workspace 4 Sub-tabs */}
+          {activeWorkspace === 'tools' && (
+            <>
+              <button
+                onClick={() => { soundManager.playClick(); setToolsSubTab('shortcuts'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  toolsSubTab === 'shortcuts' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Sổ Tay Phím Tắt Vàng
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setToolsSubTab('analytics'); }}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  toolsSubTab === 'analytics' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Phân Tích Năng Lực & Radar
+              </button>
+              <button
+                onClick={() => { soundManager.playClick(); setIsSheetsModalOpen(true); }}
+                className="px-3 py-1 rounded-lg font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all cursor-pointer border border-emerald-200"
+              >
+                Đồng Bộ Google Sheets & CSDL
+              </button>
+            </>
+          )}
 
-        {currentTab === 'theory' && (
-          <TheoryQuiz
-            selectedSubject={selectedSubject}
-            bookmarkedIds={stats.bookmarkedQuestionIds}
-            wrongIds={stats.wrongQuestionIds}
-            onStatsUpdate={refreshStats}
-          />
-        )}
-
-        {currentTab === 'practical' && (
-          <PracticalSimulator
-            selectedSubject={selectedSubject}
-            completedTaskIds={stats.completedTaskIds}
-            onStatsUpdate={refreshStats}
-          />
-        )}
-
-        {currentTab === 'file-grader' && (
-          <RealFileGrader currentUser={user} onStatsUpdate={refreshStats} />
-        )}
-
-        {currentTab === 'roadmap' && (
-          <PersonalizedRoadmap
-            stats={stats}
-            onNavigateTab={(t) => setCurrentTab(t as any)}
-            onSelectSubject={(s) => setSelectedSubject(s)}
-          />
-        )}
-
-        {currentTab === 'ai-tutor' && (
-          <AITutorChat
-            selectedSubject={selectedSubject}
-          />
-        )}
-
-        {currentTab === 'ai-practice' && (
-          <AIPracticeGenerator
-            selectedSubject={selectedSubject}
-          />
-        )}
-
-        {currentTab === 'shortcuts' && (
-          <ShortcutsGuide selectedSubject={selectedSubject} />
-        )}
-
-        {currentTab === 'analytics' && (
-          <AnalyticsDashboard
-            stats={stats}
-            onStatsUpdate={refreshStats}
-            onNavigateToQuiz={() => setCurrentTab('theory')}
-          />
-        )}
+        </div>
       </div>
 
-      {/* System Check Modal */}
+      {/* ========================================================================= */}
+      {/* WORKSPACE VIEWPORTS: COMPACT, BALANCED, ZERO CLUTTER */}
+      {/* ========================================================================= */}
+      <div className="py-5 flex-1">
+        
+        {/* WORKSPACE 1: TỔNG QUAN & TIẾN ĐỘ */}
+        {activeWorkspace === 'overview' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            {overviewSubTab === 'hub' && (
+              <Dashboard 
+                onSelectSubject={(sub) => setSelectedSubject(sub)}
+                onSelectTab={(tab) => {
+                  if (tab === 'leaderboard') setOverviewSubTab('leaderboard');
+                  else if (tab === 'progress-charts') setOverviewSubTab('charts');
+                  else if (tab === 'practical') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('ribbon_simulator');
+                  } else if (tab === 'quiz-engine') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('quiz_engine');
+                  }
+                }}
+                onStartExam={(sub) => navigate(`/thi-thu?subject=${sub || 'excel'}`)}
+              />
+            )}
+
+            {overviewSubTab === 'charts' && (
+              <div className="space-y-4">
+                <ProgressDashboard />
+              </div>
+            )}
+
+            {overviewSubTab === 'leaderboard' && (
+              <Leaderboard 
+                onSelectAction={(action, subject) => {
+                  if (action === 'study') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('quiz_engine');
+                  } else {
+                    navigate(`/thi-thu?subject=${subject || 'excel'}`);
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
+
+        {/* WORKSPACE 2: KHẢO THÍ & THỰC HÀNH */}
+        {activeWorkspace === 'exam_practice' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            {practiceSubTab === 'exam_center' && (
+              <div className="space-y-5">
+                {/* Hero Card for 50-minute Certiport Exam */}
+                <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white shadow-xl border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-2 max-w-2xl">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-400/30">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Phòng Khảo Thí Chuẩn Hóa Quốc Tế Certiport
+                    </div>
+                    <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                      Kỳ Thi Thử MOS 50 Phút (1000 Điểm)
+                    </h2>
+                    <p className="text-xs sm:text-sm text-emerald-100/80 leading-relaxed">
+                      Đề thi bao quát trắc nghiệm tình huống, nhận diện lệnh Ribbon và thao tác chuẩn xác. Hệ thống chấm tự động và lưu điểm minh bạch vào CSDL & Google Sheets.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playClick();
+                      navigate(`/thi-thu?subject=${selectedSubject === 'all' ? 'excel' : selectedSubject}`);
+                    }}
+                    className="px-6 py-3.5 bg-gradient-to-r from-emerald-400 to-teal-300 hover:from-emerald-300 hover:to-teal-200 text-slate-950 font-black text-sm rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Bắt Đầu Làm Bài Ngay</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Quick Cards to Practice Modes */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div 
+                    onClick={() => setPracticeSubTab('quiz_engine')}
+                    className="p-4 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-transform">
+                      <BookOpen className="w-5 h-5" />
+                    </div>
+                    <h3 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700">Trắc Nghiệm Firestore Quiz</h3>
+                    <p className="text-xs text-slate-500 mt-1">Luyện tập câu hỏi phân theo từng Domain kỹ năng Certiport.</p>
+                  </div>
+
+                  <div 
+                    onClick={() => setPracticeSubTab('ribbon_simulator')}
+                    className="p-4 rounded-xl bg-white border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-transform">
+                      <Monitor className="w-5 h-5" />
+                    </div>
+                    <h3 className="font-bold text-sm text-slate-900 group-hover:text-blue-700">Thực Hành Ribbon 1000 Tasks</h3>
+                    <p className="text-xs text-slate-500 mt-1">Giả lập thao tác Ribbon Word, Excel, PowerPoint chuẩn GMetrix.</p>
+                  </div>
+
+                  <div 
+                    onClick={() => setPracticeSubTab('file_grader')}
+                    className="p-4 rounded-xl bg-white border border-slate-200 hover:border-purple-400 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-transform">
+                      <FileSpreadsheet className="w-5 h-5" />
+                    </div>
+                    <h3 className="font-bold text-sm text-slate-900 group-hover:text-purple-700">Chấm File Tự Động</h3>
+                    <p className="text-xs text-slate-500 mt-1">Nộp tệp bài làm .xlsx hoặc .docx để AI chấm điểm tức thì.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {practiceSubTab === 'quiz_engine' && (
+              <QuizEngine initialSubject={selectedSubject === 'all' ? 'excel' : selectedSubject} />
+            )}
+
+            {practiceSubTab === 'ribbon_simulator' && (
+              <PracticalSimulator
+                selectedSubject={selectedSubject}
+                completedTaskIds={stats.completedTaskIds}
+                onStatsUpdate={refreshStats}
+              />
+            )}
+
+            {practiceSubTab === 'file_grader' && (
+              <RealFileGrader currentUser={user} onStatsUpdate={refreshStats} />
+            )}
+
+            {practiceSubTab === 'theory' && (
+              <TheoryQuiz
+                selectedSubject={selectedSubject}
+                bookmarkedIds={stats.bookmarkedQuestionIds}
+                wrongIds={stats.wrongQuestionIds}
+                onStatsUpdate={refreshStats}
+              />
+            )}
+          </div>
+        )}
+
+        {/* WORKSPACE 3: TRÍ TUỆ NHÂN TẠO & LỘ TRÌNH */}
+        {activeWorkspace === 'ai_roadmap' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            {aiSubTab === 'roadmap' && (
+              <PersonalizedRoadmap
+                stats={stats}
+                onNavigateTab={(t) => {
+                  if (t === 'theory') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('theory');
+                  } else if (t === 'practical') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('ribbon_simulator');
+                  }
+                }}
+                onSelectSubject={(s) => setSelectedSubject(s)}
+              />
+            )}
+
+            {aiSubTab === 'ai_tutor' && (
+              <AITutorChat selectedSubject={selectedSubject} />
+            )}
+
+            {aiSubTab === 'ai_practice' && (
+              <AIPracticeGenerator selectedSubject={selectedSubject} />
+            )}
+          </div>
+        )}
+
+        {/* WORKSPACE 4: CÔNG CỤ & TRA CỨU */}
+        {activeWorkspace === 'tools' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            {toolsSubTab === 'shortcuts' && (
+              <ShortcutsGuide selectedSubject={selectedSubject} />
+            )}
+
+            {toolsSubTab === 'analytics' && (
+              <MasteryProgressDashboard
+                onStartExam={(s) => {
+                  navigate(`/thi-thu?subject=${s || (selectedSubject === 'all' ? 'excel' : selectedSubject)}`);
+                }}
+                onNavigateTab={(t) => {
+                  if (t === 'quiz-engine') {
+                    setActiveWorkspace('exam_practice');
+                    setPracticeSubTab('quiz_engine');
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
+
+      </div>
+
+      {/* ========================================================================= */}
+      {/* MODALS */}
+      {/* ========================================================================= */}
       <SystemCheckModal
         isOpen={isSystemCheckOpen}
         onClose={() => setIsSystemCheckOpen(false)}
       />
 
-      {/* Leaderboard Modal */}
       <LeaderboardModal
         isOpen={isLeaderboardOpen}
         onClose={() => setIsLeaderboardOpen(false)}
       />
 
-      {/* Certificate Modal */}
       <MOSCertificateModal
         isOpen={isCertificateOpen}
         user={user}
@@ -414,7 +687,6 @@ export const Home: React.FC = () => {
         onClose={() => setIsCertificateOpen(false)}
       />
 
-      {/* Supervisor Report Modal */}
       {isReportOpen && (
         <SupervisorReportModal
           stats={stats}
@@ -422,10 +694,22 @@ export const Home: React.FC = () => {
         />
       )}
 
-      {/* Google Sheets Backup & Sync Modal */}
       <GoogleSheetsBackupModal
         isOpen={isSheetsModalOpen}
         onClose={() => setIsSheetsModalOpen(false)}
+      />
+
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+      />
+
+      <OfflineStudyManagerModal
+        isOpen={isOfflineManagerOpen}
+        onClose={() => setIsOfflineManagerOpen(false)}
+        onStartExam={(subject) => {
+          navigate(`/thi-thu?subject=${subject}`);
+        }}
       />
     </div>
   );

@@ -506,10 +506,9 @@ export function generateMassiveTheoryQuestions(subject: 'word' | 'excel', totalC
 // 2. GENERATOR FOR 1,000 WORD & 1,000 EXCEL PRACTICAL TASKS
 // =========================================================================
 
-export function generateMassivePracticalTasks(subject: 'word' | 'excel', totalCount: number = 1000): MassivePracticalTask[] {
-  const isWord = subject === 'word';
+export function generateMassivePracticalTasks(subject: 'word' | 'excel' | 'powerpoint', totalCount: number = 1000): MassivePracticalTask[] {
   const tasks: MassivePracticalTask[] = [];
-  const rng = createSeededRandom(isWord ? 30303 : 40404);
+  const rng = createSeededRandom(subject === 'word' ? 30303 : subject === 'excel' ? 40404 : 50505);
 
   const wordActions = [
     { cmd: 'Margins', tab: 'Layout' as const, param: 'Narrow', hint: 'Thẻ Layout > nhóm Page Setup > Margins > chọn Narrow (0.5 inch).', cat: 'Thiết Lập Trang', domain: 'Quản lý tài liệu & Thiết lập trang' },
@@ -554,7 +553,21 @@ export function generateMassivePracticalTasks(subject: 'word' | 'excel', totalCo
     { cmd: 'Move Chart', tab: 'Insert' as const, param: 'New Sheet named "Charts"', hint: 'Chọn biểu đồ > Thẻ Chart Design > Location > Move Chart > New sheet.', cat: 'Biểu Đồ', domain: 'Quản lý biểu đồ (Charts)' }
   ];
 
-  const pool = isWord ? wordActions : excelActions;
+  const powerpointActions = [
+    { cmd: 'Slide Size', tab: 'Design' as const, param: 'Widescreen (16:9)', hint: 'Thẻ Design > nhóm Customize > Slide Size > chọn Widescreen (16:9).', cat: 'Thiết Kế Slide', domain: 'Quản lý bài thuyết trình' },
+    { cmd: 'Slide Master', tab: 'View' as const, param: 'Slide Master View', hint: 'Thẻ View > nhóm Master Views > nhấp chọn Slide Master.', cat: 'Slide Master', domain: 'Quản lý bài thuyết trình' },
+    { cmd: 'New Slide', tab: 'Home' as const, param: 'Title and Content', hint: 'Thẻ Home > nhóm Slides > New Slide > chọn bố cục Title and Content.', cat: 'Trang Chiếu', domain: 'Quản lý trang chiếu' },
+    { cmd: 'Section', tab: 'Home' as const, param: 'Add Section', hint: 'Thẻ Home > Slides > Section > Add Section để phân chia các phần trình chiếu.', cat: 'Phân Đoạn', domain: 'Quản lý trang chiếu' },
+    { cmd: 'Transitions', tab: 'Transitions' as const, param: 'Morph', hint: 'Thẻ Transitions > nhóm Transition to This Slide > chọn hiệu ứng Morph.', cat: 'Chuyển Trang', domain: 'Hiệu ứng chuyển trang & Hoạt ảnh' },
+    { cmd: 'Transitions', tab: 'Transitions' as const, param: 'Push', hint: 'Thẻ Transitions > chọn hiệu ứng Push với thời lượng Duration 1.5s.', cat: 'Chuyển Trang', domain: 'Hiệu ứng chuyển trang & Hoạt ảnh' },
+    { cmd: 'Animations', tab: 'Animations' as const, param: 'Fly In', hint: 'Chọn đối tượng > Thẻ Animations > nhóm Animation > chọn Fly In.', cat: 'Hoạt Ảnh', domain: 'Hiệu ứng chuyển trang & Hoạt ảnh' },
+    { cmd: 'Animation Pane', tab: 'Animations' as const, param: 'Open Pane', hint: 'Thẻ Animations > nhóm Advanced Animation > nhấp Animation Pane.', cat: 'Hoạt Ảnh', domain: 'Hiệu ứng chuyển trang & Hoạt ảnh' },
+    { cmd: 'SmartArt', tab: 'Insert' as const, param: 'Hierarchy', hint: 'Thẻ Insert > nhóm Illustrations > SmartArt > Hierarchy > Organization Chart.', cat: 'Sơ Đồ', domain: 'Chèn & Định dạng hình khối, đồ họa' },
+    { cmd: 'Audio', tab: 'Insert' as const, param: 'Audio on My PC', hint: 'Thẻ Insert > nhóm Media > Audio > chọn Audio on My PC.', cat: 'Đa Phương Tiện', domain: 'Chèn phương tiện & Đa truyền thông' },
+    { cmd: 'Video', tab: 'Insert' as const, param: 'Online Video', hint: 'Thẻ Insert > nhóm Media > Video > chèn video từ liên kết trực tuyến.', cat: 'Đa Phương Tiện', domain: 'Chèn phương tiện & Đa truyền thông' }
+  ];
+
+  const pool = subject === 'word' ? wordActions : subject === 'excel' ? excelActions : powerpointActions;
 
   for (let i = 1; i <= totalCount; i++) {
     const actIdx = (i - 1) % pool.length;
@@ -562,10 +575,17 @@ export function generateMassivePracticalTasks(subject: 'word' | 'excel', totalCo
     const diffRoll = rng();
     const difficulty: 'easy' | 'medium' | 'hard' = diffRoll < 0.4 ? 'easy' : diffRoll < 0.75 ? 'medium' : 'hard';
 
-    const cellRef = isWord ? `đoạn văn bản số ${((i % 8) + 1)}` : `dải ô A${(i % 10) + 1}:F${(i % 10) + 15}`;
-    const instruction = isWord
+    const cellRef = subject === 'word' 
+      ? `đoạn văn bản số ${((i % 8) + 1)}` 
+      : subject === 'excel' 
+      ? `dải ô A${(i % 10) + 1}:F${(i % 10) + 15}`
+      : `trang chiếu số ${((i % 5) + 1)}`;
+
+    const instruction = subject === 'word'
       ? `Trên tài liệu hiện tại, thực hiện thao tác "${act.cmd}" với tham số "${act.param}" áp dụng cho ${cellRef}.`
-      : `Trên trang tính hiện hành, áp dụng tính năng "${act.cmd}" (${act.param}) cho ${cellRef}.`;
+      : subject === 'excel'
+      ? `Trên trang tính hiện hành, áp dụng tính năng "${act.cmd}" (${act.param}) cho ${cellRef}.`
+      : `Trên bài thuyết trình hiện hành, áp dụng thiết lập "${act.cmd}" với giá trị "${act.param}" cho ${cellRef}.`;
 
     tasks.push({
       id: `p-${subject[0]}-${i}`,
@@ -593,6 +613,7 @@ let cachedWordTheory: Question[] | null = null;
 let cachedExcelTheory: Question[] | null = null;
 let cachedWordPractical: MassivePracticalTask[] | null = null;
 let cachedExcelPractical: MassivePracticalTask[] | null = null;
+let cachedPowerPointPractical: MassivePracticalTask[] | null = null;
 
 export function getWordTheoryBank(): Question[] {
   if (!cachedWordTheory) {
@@ -620,6 +641,13 @@ export function getExcelPracticalBank(): MassivePracticalTask[] {
     cachedExcelPractical = generateMassivePracticalTasks('excel', 1000);
   }
   return cachedExcelPractical;
+}
+
+export function getPowerPointPracticalBank(): MassivePracticalTask[] {
+  if (!cachedPowerPointPractical) {
+    cachedPowerPointPractical = generateMassivePracticalTasks('powerpoint', 1000);
+  }
+  return cachedPowerPointPractical;
 }
 
 // Combined Theory Question Bank combining static master questions + 1000 Word + 1000 Excel

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MOSSubject, ExamResult } from '../types/mos';
 import { UserProfile } from '../types/user';
 import { soundManager } from '../utils/audio';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -25,8 +26,11 @@ import {
   Send,
   Eye,
   RefreshCw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  WifiOff
 } from 'lucide-react';
+import { offlineSyncService } from '../services/offlineSyncService';
+import { THEORY_QUESTIONS } from '../data/theoryQuestions';
 
 interface SanitizedQuestion {
   id: string;
@@ -57,6 +61,20 @@ interface ReviewQuestion {
   explanation: string;
   officialRibbonPath: string;
   shortcutTip?: string;
+}
+
+export interface ExamSubmissionResult {
+  score: number;
+  passed: boolean;
+  correctCount: number;
+  totalQuestions: number;
+  timeSpentSeconds: number;
+  violationsCount: number;
+  domainScores: Record<string, { total: number; correct: number }>;
+  questions?: ReviewQuestion[];
+  teacherId?: string;
+  teacherName?: string;
+  subject?: string;
 }
 
 interface ExamRoomViewProps {
@@ -94,7 +112,7 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Post-exam review states
-  const [submissionResult, setSubmissionResult] = useState<any | null>(null);
+  const [submissionResult, setSubmissionResult] = useState<ExamSubmissionResult | null>(null);
   const [reviewQuestions, setReviewQuestions] = useState<ReviewQuestion[]>([]);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong' | 'marked'>('all');
   const [lastSavedText, setLastSavedText] = useState<string>('Tự động lưu kích hoạt');
@@ -220,8 +238,52 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
 
       // Save initial draft
       persistDraft(data.sessionId, loadedQuestions, {}, duration, 0, {});
+
+      // Track study session in PostgreSQL & Google Sheets transparently
+      unifiedLoggingService.trackStudySession({
+        sessionId: data.sessionId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userEmail: currentUser.email || 'hocvien@student.edu.vn',
+        sessionType: 'exam_room',
+        durationMinutes: 50,
+      }).catch((e) => console.warn('Study session logging notice:', e));
     } catch (err) {
-      console.error('Failed to load exam questions from server:', err);
+      console.warn('[ExamRoom] Network unavailable, activating offline cache fallback:', err);
+      try {
+        let offlineQuestions = await offlineSyncService.getOfflineQuizQuestions(selectedSubject as any);
+        if (!offlineQuestions || offlineQuestions.length === 0) {
+          offlineQuestions = THEORY_QUESTIONS.filter(q => selectedSubject === 'all' || q.subject === selectedSubject);
+        }
+
+        if (offlineQuestions && offlineQuestions.length > 0) {
+          const sanitized = offlineQuestions.slice(0, 25).map((q: any) => ({
+            id: q.id,
+            subject: q.subject,
+            domainId: q.domainId,
+            domainName: q.domainName,
+            difficulty: q.difficulty || 'medium',
+            type: q.type || 'multiple-choice',
+            title: q.title,
+            scenario: q.scenario,
+            options: q.options,
+            points: q.points || 40,
+          }));
+
+          const duration = 50 * 60;
+          const offlineSessionId = 'offline-sess-' + Date.now();
+          setSessionId(offlineSessionId);
+          setQuestions(sanitized);
+          setTimeLeftSeconds(duration);
+          setUserAnswers({});
+          setMarkedForReview({});
+          setIsSubmitted(false);
+          setLastSavedText('Chế độ thi ngoại tuyến (Offline)');
+          persistDraft(offlineSessionId, sanitized, {}, duration, 0, {});
+        }
+      } catch (offlineErr) {
+        console.error('[ExamRoom] Failed to load offline questions:', offlineErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -299,15 +361,13 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
     }
   };
 
-  // Timer countdown
+  // Timer countdown without updater side-effects
   useEffect(() => {
     if (isSubmitted || loading) return;
 
     const timer = setInterval(() => {
       setTimeLeftSeconds(prev => {
         if (prev <= 1) {
-          clearInterval(timer);
-          handleSubmitExam();
           return 0;
         }
         // Auto-save local draft
@@ -327,6 +387,13 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
 
     return () => clearInterval(timer);
   }, [isSubmitted, loading, sessionId, userAnswers]);
+
+  // Clean auto-submit when timer expires
+  useEffect(() => {
+    if (timeLeftSeconds === 0 && !isSubmitted && !loading && !submitting) {
+      handleSubmitExam();
+    }
+  }, [timeLeftSeconds, isSubmitted, loading, submitting]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -393,6 +460,26 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
       setIsSubmitted(true);
       localStorage.removeItem(LOCAL_DRAFT_KEY);
 
+      // Track quiz attempt transparently to PostgreSQL and Google Sheets
+      if (data.submission) {
+        unifiedLoggingService.trackQuizAttempt({
+          attemptId: data.submission.id,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email || 'hocvien@student.edu.vn',
+          subject: selectedSubject,
+          quizType: 'mock-exam',
+          score: data.submission.score,
+          totalScore: 1000,
+          percentage: Math.round((data.submission.score / 1000) * 100),
+          passed: data.submission.passed,
+          correctCount: data.submission.correctCount,
+          totalQuestions: data.submission.totalQuestions,
+          durationSeconds: timeSpent,
+          notes: `Khảo thí phòng thi 50p chuẩn Certiport - ${selectedSubject.toUpperCase()}`,
+        }).catch((e) => console.warn('Exam attempt dual-write deferred:', e));
+      }
+
       if (data.submission?.passed) {
         soundManager.playCorrect();
         confetti({
@@ -406,7 +493,70 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
 
       if (onStatsUpdate) onStatsUpdate();
     } catch (err) {
-      console.error('Error submitting exam:', err);
+      console.warn('[ExamRoom] Network submission failed, generating local offline evaluation:', err);
+      // Grade locally using question bank
+      let correct = 0;
+      const reviewQs: ReviewQuestion[] = [];
+      questions.forEach((q) => {
+        const fullQ = THEORY_QUESTIONS.find(tq => tq.id === q.id);
+        const correctAns = fullQ?.correctAnswer || 'A';
+        const userAns = userAnswers[q.id];
+        const isCorr = Boolean(userAns && userAns.toUpperCase() === correctAns.toUpperCase());
+        if (isCorr) correct++;
+        reviewQs.push({
+          id: q.id,
+          subject: q.subject,
+          domainName: q.domainName,
+          title: q.title,
+          scenario: q.scenario,
+          options: q.options,
+          userAnswer: userAns,
+          correctAnswer: correctAns,
+          isCorrect: isCorr,
+          explanation: fullQ?.explanation || 'Đáp án chính xác theo tài liệu khảo thí quốc tế Certiport.',
+          officialRibbonPath: fullQ?.officialRibbonPath || 'Xem thanh công cụ Ribbon.',
+          shortcutTip: fullQ?.shortcutTip,
+        });
+      });
+
+      const totalQ = questions.length || 1;
+      const calculatedScore = Math.round((correct / totalQ) * 1000);
+      const passed = calculatedScore >= 700;
+      const localSubmission: any = {
+        id: 'sub-offline-' + Date.now(),
+        studentId: currentUser.id,
+        studentName: currentUser.name,
+        studentCode: currentUser.studentCode,
+        classRoom: currentUser.classRoom,
+        subject: selectedSubject,
+        type: 'mock-exam',
+        score: calculatedScore,
+        passed,
+        timeSpentSeconds: (50 * 60) - timeLeftSeconds,
+        totalQuestions: totalQ,
+        correctCount: correct,
+        teacherId: currentUser.assignedTeacherId || 't-word-01',
+        teacherName: currentUser.assignedTeacherName || 'Giáo viên phụ trách',
+        submittedAt: new Date().toISOString(),
+        status: 'pending',
+        violationsCount,
+        antiCheatLogs,
+        isOfflineSubmitted: true,
+      };
+
+      setSubmissionResult(localSubmission);
+      setReviewQuestions(reviewQs);
+      setIsSubmitted(true);
+      try {
+        localStorage.removeItem(`${LOCAL_DRAFT_KEY}_${selectedSubject}`);
+      } catch {}
+
+      if (passed) {
+        soundManager.playCorrect();
+        confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+      } else {
+        soundManager.playWrong();
+      }
     } finally {
       setSubmitting(false);
     }
@@ -526,7 +676,7 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
             <div className="flex items-center gap-3">
               {passed && onOpenCertificate && (
                 <button
-                  onClick={() => onOpenCertificate(submissionResult.subject, score)}
+                  onClick={() => onOpenCertificate(submissionResult.subject || selectedSubject, score)}
                   className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all"
                 >
                   <Award className="w-4 h-4" />

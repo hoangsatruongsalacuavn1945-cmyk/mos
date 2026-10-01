@@ -3,6 +3,8 @@ import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
 import { useAuthStore, AUTH_TOKEN_KEY } from '../utils/userStore';
 import { useUserProgressStore } from '../utils/userProgressStore';
 import { syncCurrentSessionUserProfile } from '../services/userProfileSheetSyncService';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
+import { SHEET_NAMES } from '../services/googleSheetsService';
 import { soundManager } from '../utils/audio';
 import { 
   FileSpreadsheet, 
@@ -50,6 +52,7 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isServerBackingUp, setIsServerBackingUp] = useState(false);
+  const [isMasterSyncing, setIsMasterSyncing] = useState(false);
 
   if (!isOpen) return null;
 
@@ -58,6 +61,29 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
   if (!isAuthorized) {
     return null;
   }
+
+  const handleMasterFullSync = async () => {
+    soundManager.playClick();
+    setIsMasterSyncing(true);
+    setActionMessage('Đang kết nối mọi thông tin và đồng bộ 8 bảng dữ liệu liên kết lên Google Sheets...');
+
+    try {
+      const res = await unifiedLoggingService.syncAllToGoogleSheets();
+      if (res.success) {
+        soundManager.playCorrect();
+        setActionMessage(res.details);
+      } else {
+        soundManager.playWrong();
+        setActionMessage(`Lỗi: ${res.details}`);
+      }
+    } catch (err: any) {
+      soundManager.playWrong();
+      setActionMessage(`Lỗi đồng bộ: ${err.message}`);
+    } finally {
+      setIsMasterSyncing(false);
+      setTimeout(() => setActionMessage(null), 6000);
+    }
+  };
 
   const handleServerBackup = async () => {
     soundManager.playClick();
@@ -162,7 +188,7 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
       email: user.email || 'hocvien@mosmaster.edu.vn',
       role: role || 'student',
       schoolOrOrg: 'Trung Tâm Khảo Thí Tin Học MOS Master',
-    });
+    }, { promptIfMissing: true });
 
     if (result.success) {
       soundManager.playCorrect();
@@ -280,69 +306,127 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
           )}
         </div>
 
-        {/* Safe Server-Side Backup Section */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 to-teal-950 text-white border border-emerald-500/40 shadow-md">
+        {/* Dual-Write Transparency Status Banner */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white border border-indigo-500/30 shadow-md">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
+            <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                  Backend API · Bảo Mật Tuyệt Đối
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                  Dual-Write Architecture
                 </span>
-                <span className="text-xs text-emerald-300">Không lộ Token tại Client</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> PostgreSQL Database + Google Sheets
+                </span>
               </div>
-              <h4 className="text-sm font-bold text-white mt-1">
-                Sao Lưu Đồng Bộ Dữ Liệu Qua Máy Chủ Node.js
+              <h4 className="text-sm font-bold text-white">
+                Hệ Thống Ghi Đồng Thời & Nhật Ký Hoạt Động Siêu Chi Tiết
               </h4>
-              <p className="text-xs text-emerald-100/80 mt-0.5">
-                Máy chủ sẽ trực tiếp tổng hợp danh sách tài khoản, điểm số và tiến độ học tập để ghi vào Google Sheets trung tâm.
+              <p className="text-xs text-indigo-100/80">
+                Mọi bài thi thử, cập nhật tiến độ, thao tác Ribbon 1000 tasks và phiên học tập được lưu đồng thời vào CSDL PostgreSQL và 8 bảng tính liên kết trên Google Sheets.
               </p>
             </div>
 
             <button
-              onClick={handleServerBackup}
-              disabled={isServerBackingUp}
-              className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 shrink-0"
+              onClick={handleMasterFullSync}
+              disabled={isMasterSyncing || !isConnected}
+              className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 shrink-0"
             >
-              <RefreshCw className={`w-4 h-4 ${isServerBackingUp ? 'animate-spin' : ''}`} />
-              <span>{isServerBackingUp ? 'Đang Sao Lưu Máy Chủ...' : 'Sao Lưu Ngay Qua Máy Chủ'}</span>
+              <RefreshCw className={`w-4 h-4 ${isMasterSyncing ? 'animate-spin' : ''}`} />
+              <span>{isMasterSyncing ? 'Đang Liên Kết & Đồng Bộ...' : 'Đồng Bộ Toàn Bộ 8 Bảng Liên Kết'}</span>
             </button>
           </div>
         </div>
 
-        {/* 3 Pre-formatted Sheets Architecture */}
+        {/* 8 Interconnected Sheets Architecture */}
         <div className="space-y-2.5">
-          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-            <Database className="w-4 h-4 text-blue-600" />
-            Cấu Trúc 3 Trang Dữ Liệu Tự Động Trong Bảng Tính:
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="font-bold text-slate-900 block flex items-center gap-1">
-                <Users className="w-3.5 h-3.5 text-blue-600" />
-                1. Nhật Ký Đăng Nhập
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Database className="w-4 h-4 text-indigo-600" />
+              Cấu Trúc 8 Bảng Dữ Liệu Được Kết Nối Toàn Diện Qua UID & Email:
+            </h4>
+            <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+              Quan hệ 1-N & Tổng hợp Master
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+            <div className="p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-200">
+              <span className="font-bold text-indigo-950 block flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                1. Bảng Tổng Hợp Master
               </span>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Lưu UID, Tên, Email, Vai trò, Thời gian và Thiết bị mỗi khi học viên đăng nhập.
+              <p className="text-[10px] text-indigo-900/80 mt-0.5">
+                Hub trung tâm: UID, Họ tên, Tổng %, Word/Excel/PPT %, Điểm cao nhất, Trạng thái.
               </p>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="font-bold text-slate-900 block flex items-center gap-1">
-                <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
-                2. Tiến Độ Học Tập
+            <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
+              <span className="font-bold text-emerald-950 block flex items-center gap-1">
+                <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                2. Nhật Ký Chi Tiết
               </span>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Theo dõi % hoàn thành 3 môn Word (MO-100), Excel (MO-200), PowerPoint (MO-300).
+              <p className="text-[10px] text-emerald-900/80 mt-0.5">
+                Ghi chép siêu chi tiết: Thao tác Ribbon, Thời lượng, Thiết bị, Điểm số, Mã Log ID.
               </p>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="font-bold text-slate-900 block flex items-center gap-1">
+            <div className="p-2.5 rounded-xl bg-orange-50/70 border border-orange-200">
+              <span className="font-bold text-orange-950 block flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-orange-600" />
-                3. Kết Quả Thi Thử
+                3. Kết Quả Thi & Quiz
               </span>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Điểm số bài thi, tỷ lệ %, kết quả ĐẠT / CHƯA ĐẠT và thời gian hoàn tất.
+              <p className="text-[10px] text-orange-900/80 mt-0.5">
+                Lịch sử phòng thi 50p, số câu đúng/sai, thang điểm 1000, Certiport Passed.
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200">
+              <span className="font-bold text-blue-950 block flex items-center gap-1">
+                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                4. Tiến Độ Học Tập
+              </span>
+              <p className="text-[10px] text-blue-900/80 mt-0.5">
+                Theo dõi 15 bài học, tỷ lệ % từng môn, chuỗi ngày streak học tập.
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200">
+              <span className="font-bold text-purple-950 block flex items-center gap-1">
+                <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
+                5. Thực Hành 1000 Tasks
+              </span>
+              <p className="text-[10px] text-purple-900/80 mt-0.5">
+                Lưu từng lệnh Ribbon thực thi theo chuẩn đề GMetrix / Certiport.
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-teal-50/70 border border-teal-200">
+              <span className="font-bold text-teal-950 block flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-teal-600" />
+                6. Phiên Đăng Nhập
+              </span>
+              <p className="text-[10px] text-teal-900/80 mt-0.5">
+                Mã Session ID, thời lượng học, thiết bị PC/Mobile, Browser, Resolution.
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200">
+              <span className="font-bold text-slate-900 block flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-slate-600" />
+                7. Danh Sách Hồ Sơ
+              </span>
+              <p className="text-[10px] text-slate-600 mt-0.5">
+                Hồ sơ học viên, email, số điện thoại, MSSV, trường học liên kết.
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200">
+              <span className="font-bold text-slate-900 block flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-slate-600" />
+                8. Tài Khoản Đăng Ký
+              </span>
+              <p className="text-[10px] text-slate-600 mt-0.5">
+                Danh sách tài khoản kích hoạt, lớp học và giáo viên phụ trách.
               </p>
             </div>
           </div>

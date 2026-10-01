@@ -43,8 +43,10 @@ import {
   Download,
   FileSpreadsheet,
   FileDown,
-  ChevronDown
+  ChevronDown,
+  MessageSquare
 } from 'lucide-react';
+import { FeedbackInboxTab } from './owner/FeedbackInboxTab';
 
 interface ManagedUser {
   id: string;
@@ -87,7 +89,7 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
   // Access Protection: Strictly lock interface for 'Owner' / 'Admin' role
   const isOwner = currentUser.role === 'admin';
 
-  const [activeTab, setActiveTab] = useState<'users' | 'audit-logs' | 'teachers' | 'questions' | 'system'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'audit-logs' | 'teachers' | 'questions' | 'feedback' | 'system'>('users');
   
   // User Management State
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -663,6 +665,18 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('feedback')}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                activeTab === 'feedback' 
+                  ? 'bg-amber-500 text-slate-950 shadow-sm' 
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Hòm Thư Phản Hồi & Báo Lỗi</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('system')}
               className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
                 activeTab === 'system' 
@@ -1120,6 +1134,11 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
               ))}
             </div>
           </div>
+        )}
+
+        {/* TAB: FEEDBACK INBOX */}
+        {activeTab === 'feedback' && (
+          <FeedbackInboxTab />
         )}
 
         {/* TAB 4: SYSTEM STATUS */}

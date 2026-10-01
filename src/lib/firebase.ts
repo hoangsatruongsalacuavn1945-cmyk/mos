@@ -45,7 +45,11 @@ export async function signInWithGoogle(): Promise<{ user: FirebaseUser; accessTo
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const accessToken = credential?.accessToken;
     return { user: result.user, accessToken };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+      console.warn('Google Sign-In popup was closed by user.');
+      return null;
+    }
     console.error('Google Sign-In failed:', error);
     throw error;
   }

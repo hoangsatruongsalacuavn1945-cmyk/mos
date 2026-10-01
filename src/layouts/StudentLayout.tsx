@@ -4,6 +4,7 @@ import { useAuthStore } from '../utils/userStore';
 import { useLanguageStore } from '../utils/languageStore';
 import { soundManager } from '../utils/audio';
 import { ThemeLanguageSwitcher } from '../components/ThemeLanguageSwitcher';
+import { FloatingFeedbackButton } from '../components/FloatingFeedbackButton';
 import { 
   Award, 
   BookOpen, 
@@ -181,6 +182,9 @@ export const StudentLayout: React.FC = () => {
       <main className="flex-1">
         <Outlet />
       </main>
+
+      {/* Floating Website Rating & Bug Report Launcher */}
+      <FloatingFeedbackButton />
 
       {/* Student Public Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-6 px-4 sm:px-6 text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200">

@@ -279,7 +279,7 @@ export const useAuthStore = create<AuthState>((set) => {
             displayName: fullName,
             email: updatedUser.email || '',
             role: role,
-          }).catch((err) => console.warn('Automatic profile sync deferred:', err));
+          }, { promptIfMissing: false }).catch((err) => console.warn('Automatic profile sync deferred:', err));
         }).catch(() => {});
       }
     },

@@ -4,6 +4,8 @@ import { THEORY_QUESTIONS } from '../data/theoryQuestions';
 import { recordExamResult } from '../utils/storage';
 import { getCurrentUser, getTeacherForSubject, sendSubmissionToTeacher } from '../utils/userStore';
 import { soundManager } from '../utils/audio';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
+import { shuffleArray } from '../utils/shuffle';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -44,8 +46,8 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
     if (selectedSubject !== 'all') {
       pool = THEORY_QUESTIONS.filter(q => q.subject === selectedSubject);
     }
-    // Shuffle and pick 15 questions or entire pool if <= 15
-    const shuffled = [...pool].sort(() => 0.5 - Math.random());
+    // Uniform shuffle and pick 15 questions or entire pool if <= 15
+    const shuffled = shuffleArray(pool);
     return shuffled.slice(0, Math.min(15, shuffled.length));
   }, [selectedSubject]);
 
@@ -59,23 +61,23 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong' | 'marked'>('all');
   const [assignedTeacher, setAssignedTeacher] = useState<any>(null);
 
-  // Timer countdown
+  // Timer countdown without updater side-effects
   useEffect(() => {
     if (isSubmitted) return;
 
     const timer = setInterval(() => {
-      setTimeLeftSeconds(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleSubmitExam();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeftSeconds(prev => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     return () => clearInterval(timer);
   }, [isSubmitted]);
+
+  // Clean auto-submit when timer expires
+  useEffect(() => {
+    if (timeLeftSeconds === 0 && !isSubmitted) {
+      handleSubmitExam();
+    }
+  }, [timeLeftSeconds, isSubmitted]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -144,6 +146,25 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
     setExamResult(result);
     recordExamResult(result);
     onStatsUpdate();
+
+    // Dual-write quiz attempt to PostgreSQL and Google Sheets transparently
+    const activeUser = getCurrentUser();
+    unifiedLoggingService.trackQuizAttempt({
+      attemptId: result.id,
+      userId: activeUser?.id,
+      userName: activeUser?.name,
+      userEmail: activeUser?.email,
+      subject: result.subject,
+      quizType: 'mock-exam',
+      score: result.score,
+      totalScore: 1000,
+      percentage: Math.round((result.score / 1000) * 100),
+      passed: result.passed,
+      correctCount: result.correctCount,
+      totalQuestions: result.totalQuestions,
+      durationSeconds: result.timeSpentSeconds,
+      notes: `Thi thử MOS ${result.subject.toUpperCase()} (1000đ chuẩn Certiport)`,
+    }).catch((e) => console.warn('Mock exam attempt logging deferred:', e));
 
     // Prepare wrong questions breakdown
     const wrongQuestions = examPool

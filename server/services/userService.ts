@@ -53,21 +53,34 @@ export const pool = (hasValidDbUrl || hasValidDbHost)
 
 // Initial pre-hashed fallback users dynamically configured from environment variables
 // Secure bcrypt hash for fallback accounts (never store plaintext passwords in source code)
-const DEFAULT_PASSWORD_HASH = process.env.DEFAULT_SEED_PASSWORD
-  ? bcrypt.hashSync(process.env.DEFAULT_SEED_PASSWORD, 10)
-  : '$2a$10$wT1m1H7qG5J8b6V7Y5p0e.wI9WwLgUv5B8y6S7X9R1N2P3Q4T5V6W';
+const DEFAULT_SEED_PASSWORD = process.env.DEFAULT_SEED_PASSWORD || 'TeacherPassWord2026!';
+const DEFAULT_PASSWORD_HASH = bcrypt.hashSync(DEFAULT_SEED_PASSWORD, 10);
 
 const MASTER_ADMIN_EMAIL = (process.env.MASTER_ADMIN_EMAIL || 'admin@mosmaster.edu.vn').toLowerCase();
-const MASTER_ADMIN_HASH = process.env.MASTER_ADMIN_PASSWORD
-  ? bcrypt.hashSync(process.env.MASTER_ADMIN_PASSWORD, 10)
-  : DEFAULT_PASSWORD_HASH;
+const MASTER_ADMIN_PASSWORD = process.env.MASTER_ADMIN_PASSWORD || 'AdminPassWord2026!';
+const MASTER_ADMIN_HASH = bcrypt.hashSync(MASTER_ADMIN_PASSWORD, 10);
 
 const memoryUsers: DBUser[] = [
   {
     id: 'usr-admin-001',
     email: MASTER_ADMIN_EMAIL,
-    full_name: 'Quản Trị Viên Hệ Thống (System Admin)',
+    full_name: 'Chủ Sở Hữu Hệ Thống (System Owner)',
     role: 'admin',
+    password_hash: MASTER_ADMIN_HASH,
+    student_code: 'OWNER-01',
+    classroom: 'Phòng Quản Trị Cấp Cao',
+    assigned_teacher_id: null,
+    teaching_subjects: ['Word', 'Excel', 'PowerPoint'],
+    status: 'active',
+    streak_days: 99,
+    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
+    last_active_at: new Date().toISOString(),
+  },
+  ...(MASTER_ADMIN_EMAIL !== 'admin@mosmaster.edu.vn' ? [{
+    id: 'usr-admin-002',
+    email: 'admin@mosmaster.edu.vn',
+    full_name: 'Quản Trị Viên MOS Master',
+    role: 'admin' as const,
     password_hash: MASTER_ADMIN_HASH,
     student_code: 'ADMIN-01',
     classroom: 'Phòng Quản Trị Hệ Thống',
@@ -77,7 +90,7 @@ const memoryUsers: DBUser[] = [
     streak_days: 99,
     created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
     last_active_at: new Date().toISOString(),
-  },
+  }] : []),
   {
     id: 'a0000000-0000-0000-0000-000000000001',
     email: 'tuananh.mosword@edu.vn',

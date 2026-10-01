@@ -88,6 +88,7 @@ export interface SheetSyncOptions {
   profileSheetName?: string;
   sessionLogSheetName?: string;
   forceTokenRefresh?: boolean;
+  promptIfMissing?: boolean;
 }
 
 const DEFAULT_SPREADSHEET_TITLE = 'MOS Master - Hệ Thống Dữ Liệu Học Viên & Khảo Thí Tập Trung';
@@ -129,11 +130,13 @@ function parseClientEnvironment() {
 /**
  * Retrieve valid Google OAuth Access Token
  */
-export async function getValidAccessToken(forceRefresh = false): Promise<string> {
+export async function getValidAccessToken(forceRefresh = false, allowPrompt = false): Promise<string | null> {
   let token = getStoredGoogleToken();
-  if (!token || forceRefresh) {
-    token = await requestGoogleSheetsToken();
-    saveStoredGoogleToken(token);
+  if ((!token && allowPrompt) || (token && forceRefresh)) {
+    token = await requestGoogleSheetsToken(forceRefresh);
+    if (token) {
+      saveStoredGoogleToken(token);
+    }
   }
   return token;
 }
@@ -511,7 +514,18 @@ export async function syncCurrentSessionUserProfile(
   const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
 
   try {
-    const accessToken = await getValidAccessToken(options.forceTokenRefresh);
+    const allowPrompt = options.promptIfMissing ?? false;
+    const accessToken = await getValidAccessToken(options.forceTokenRefresh, allowPrompt);
+
+    // If no active Google token and not prompting, gracefully defer sync without error
+    if (!accessToken) {
+      return {
+        success: false,
+        error: 'Chưa có phiên kết nối Google Sheets (sync deferred)',
+        timestamp,
+      };
+    }
+
     const { id: spreadsheetId, url: spreadsheetUrl } = await getOrInitializeSyncSpreadsheet(
       accessToken, 
       options
@@ -537,8 +551,12 @@ export async function syncCurrentSessionUserProfile(
     const isEmailVerified = fbUser?.emailVerified ?? Boolean(profileOverride?.email);
     const providerId = fbUser?.providerData?.[0]?.providerId || 'password';
 
+    const secureRandomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID().substring(0, 8).toUpperCase()
+      : `${Date.now()}`;
+
     const sessionData: UserSessionAuthData = {
-      sessionId: `SES-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+      sessionId: `SES-${Date.now()}-${secureRandomSuffix}`,
       providerId: providerId,
       emailVerified: isEmailVerified,
       loginTimestamp: timestamp,
@@ -577,7 +595,19 @@ export async function syncCurrentSessionUserProfile(
       timestamp,
     };
   } catch (error: any) {
-    console.error('Failed to sync user profile and authentication session:', error);
+    const isCancelled = error?.message?.includes('đã bị đóng') || error?.code === 'auth/popup-closed-by-user';
+    const is401 = error?.message?.includes('401') || error?.status === 401;
+
+    if (is401) {
+      clearStoredGoogleToken();
+    }
+
+    if (isCancelled || is401) {
+      console.warn('[UserProfileSheetSync] Sync deferred or token expired:', error?.message || error);
+    } else {
+      console.warn('[UserProfileSheetSync] Profile sync deferred:', error?.message || error);
+    }
+
     return {
       success: false,
       error: error.message || 'Lỗi không xác định khi đồng bộ lên Google Sheets',

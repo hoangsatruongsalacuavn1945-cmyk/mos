@@ -2,6 +2,7 @@ import { db } from '../lib/firebase';
 import { collection, getDocs, query, where, doc, setDoc, limit } from 'firebase/firestore';
 import { Question, MOSSubject } from '../types/mos';
 import { THEORY_QUESTIONS } from '../data/theoryQuestions';
+import { shuffleArray } from '../utils/shuffle';
 
 export interface QuizQuestionItem {
   id: string;
@@ -68,10 +69,10 @@ export async function fetchQuestionsFromFirestore(
     await seedQuestionsToFirestoreIfEmpty();
 
     const questionsRef = collection(db, 'questions');
-    let qQuery = query(questionsRef, limit(maxQuestions * 2));
+    let qQuery = query(questionsRef, limit(maxQuestions));
 
     if (subject !== 'all') {
-      qQuery = query(questionsRef, where('subject', '==', subject), limit(maxQuestions * 2));
+      qQuery = query(questionsRef, where('subject', '==', subject), limit(maxQuestions));
     }
 
     const snapshot = await getDocs(qQuery);
@@ -96,11 +97,9 @@ export async function fetchQuestionsFromFirestore(
       });
     });
 
-    // If Firestore has results, shuffle and return requested count
+    // If Firestore has results, uniformly shuffle and return requested count
     if (firestoreQuestions.length > 0) {
-      return firestoreQuestions
-        .sort(() => 0.5 - Math.random())
-        .slice(0, maxQuestions);
+      return shuffleArray(firestoreQuestions).slice(0, maxQuestions);
     }
 
     // Fallback to local THEORY_QUESTIONS if remote network is offline

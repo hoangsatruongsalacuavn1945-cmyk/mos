@@ -6,6 +6,7 @@ import {
 import { useUserProgressStore, MOSSubjectTrack } from '../utils/userProgressStore';
 import { useAuthStore } from '../utils/userStore';
 import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
 import { soundManager } from '../utils/audio';
 import confetti from 'canvas-confetti';
 import {
@@ -119,8 +120,23 @@ export const QuizEngine: React.FC<QuizEngineProps> = ({
         domainName: `Firestore Quiz ${selectedSubject.toUpperCase()}`,
       });
 
-      // Backup quiz score to Google Sheets
+      // Dual-write quiz score to PostgreSQL and Google Sheets transparently
       const currentUser = useAuthStore.getState().user;
+      unifiedLoggingService.trackQuizAttempt({
+        userId: currentUser.id || 'guest',
+        userName: currentUser.name || currentUser.fullName || 'Học viên',
+        userEmail: currentUser.email || 'hocvien@student.edu.vn',
+        subject: selectedSubject,
+        quizType: 'theory-quiz',
+        score: correctCount,
+        totalScore: questions.length,
+        percentage,
+        passed: percentage >= 70,
+        correctCount,
+        totalQuestions: questions.length,
+        notes: `Khảo thí trắc nghiệm chuẩn Certiport - ${selectedSubject.toUpperCase()}`,
+      }).catch((e) => console.warn('Dual-write quiz logging deferred:', e));
+
       useGoogleSheetsStore.getState().backupExamScore({
         uid: currentUser.id || 'guest',
         name: currentUser.name || currentUser.fullName || 'Học viên',

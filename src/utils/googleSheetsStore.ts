@@ -73,7 +73,11 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
   connect: async () => {
     set({ isConnecting: true });
     try {
-      const token = await requestGoogleSheetsToken();
+      const token = await requestGoogleSheetsToken(true);
+      if (!token) {
+        set({ isConnecting: false });
+        return false;
+      }
       const { id, url } = await getOrCreateMosSpreadsheet(token);
       set({ 
         isConnected: true, 
@@ -82,8 +86,12 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
         spreadsheetUrl: url 
       });
       return true;
-    } catch (err) {
-      console.error('Failed to connect Google Sheets:', err);
+    } catch (err: any) {
+      if (err?.message?.includes('đã bị đóng') || err?.code === 'auth/popup-closed-by-user') {
+        console.warn('Google Sheets connection popup was closed by user.');
+      } else {
+        console.warn('Failed to connect Google Sheets:', err?.message || err);
+      }
       set({ isConnecting: false });
       return false;
     }

@@ -1,15 +1,18 @@
 import React, { useState, useMemo } from 'react';
 import { MOSSubject } from '../types/mos';
-import { getWordPracticalBank, getExcelPracticalBank, MassivePracticalTask } from '../data/massiveQuestionBank';
+import { getWordPracticalBank, getExcelPracticalBank, getPowerPointPracticalBank, MassivePracticalTask } from '../data/massiveQuestionBank';
 import { recordCompletedTask } from '../utils/storage';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
 import { soundManager } from '../utils/audio';
 import { OfficeRibbon } from './office/OfficeRibbon';
 import { WordDocumentView } from './office/WordDocumentView';
 import { ExcelSheetView } from './office/ExcelSheetView';
+import { PowerPointSlideView } from './office/PowerPointSlideView';
 import { GMetrixTaskDock } from './office/GMetrixTaskDock';
 import { 
   FileSpreadsheet, 
   FileText, 
+  Presentation,
   Search, 
   Sparkles,
   Grid,
@@ -28,9 +31,9 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
   completedTaskIds,
   onStatsUpdate,
 }) => {
-  // Active subject within the 1000-task bank (default to selectedSubject if word/excel, else 'word')
-  const [activeSubject, setActiveSubject] = useState<'word' | 'excel'>(
-    selectedSubject === 'excel' ? 'excel' : 'word'
+  // Active subject within the 1000-task bank (default to selectedSubject if word/excel/powerpoint, else 'word')
+  const [activeSubject, setActiveSubject] = useState<'word' | 'excel' | 'powerpoint'>(
+    selectedSubject === 'excel' ? 'excel' : selectedSubject === 'powerpoint' ? 'powerpoint' : 'word'
   );
 
   // Filters
@@ -65,9 +68,16 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
   const [excelTableFormatted, setExcelTableFormatted] = useState<boolean>(false);
   const [excelConditionalFormatted, setExcelConditionalFormatted] = useState<boolean>(false);
 
+  // PowerPoint Live Presentation States
+  const [pptTransition, setPptTransition] = useState<string>('Morph');
+  const [pptAnimation, setPptAnimation] = useState<string>('Fly In');
+  const [pptHasSmartArt, setPptHasSmartArt] = useState<boolean>(false);
+
   // Fetch full 1,000 tasks based on active subject
   const allTasks = useMemo(() => {
-    return activeSubject === 'word' ? getWordPracticalBank() : getExcelPracticalBank();
+    if (activeSubject === 'word') return getWordPracticalBank();
+    if (activeSubject === 'excel') return getExcelPracticalBank();
+    return getPowerPointPracticalBank();
   }, [activeSubject]);
 
   // Filtered task bank
@@ -106,6 +116,9 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
     setExcelTableFormatted(false);
     setExcelConditionalFormatted(false);
     setExcelActiveFormula('=SUM(D2:D10)');
+    setPptTransition('Morph');
+    setPptAnimation('Fly In');
+    setPptHasSmartArt(false);
     setTaskFeedback(null);
     setShowHint(false);
   };
@@ -177,6 +190,12 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
       setExcelHasTotalRow(true);
     } else if (cmdLower.includes('conditional')) {
       setExcelConditionalFormatted(true);
+    } else if (cmdLower.includes('transition')) {
+      setPptTransition(param || 'Morph');
+    } else if (cmdLower.includes('animation')) {
+      setPptAnimation(param || 'Fly In');
+    } else if (cmdLower.includes('smartart')) {
+      setPptHasSmartArt(true);
     }
 
     // GMetrix Rule Engine Verification
@@ -197,6 +216,17 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
       soundManager.playTaskComplete();
       recordCompletedTask(currentTask.id);
       onStatsUpdate();
+
+      // Dual-write practical task completion to PostgreSQL and Google Sheets
+      unifiedLoggingService.trackPracticalTask({
+        taskId: currentTask.id,
+        subject: activeSubject,
+        domainName: currentTask.domainName || 'Kỹ năng thực hành Ribbon',
+        executedRibbonPath: `${tab} > ${commandName}${param ? ` > ${param}` : ''}`,
+        instruction: currentTask.instruction,
+        status: 'Chính Xác (Passed)',
+      }).catch((e) => console.warn('Practical task tracking deferred:', e));
+
       setTaskFeedback({
         message: `🎉 CHÍNH XÁC (GMETRIX PASSED)! Bạn đã áp dụng thành công thao tác [${tab} > ${commandName}${param ? ` > ${param}` : ''}] cho tài liệu theo chuẩn Certiport.`,
         success: true
@@ -217,10 +247,12 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
   const completedCount = allTasks.filter(t => completedTaskIds.includes(t.id)).length;
   const progressPercent = Math.round((completedCount / allTasks.length) * 100);
 
-  // Available ribbon tabs for Word vs Excel
+  // Available ribbon tabs for Word vs Excel vs PowerPoint
   const ribbonTabs = activeSubject === 'word'
     ? ['Home', 'Insert', 'Design', 'Layout', 'References', 'Review', 'View']
-    : ['Home', 'Insert', 'Page Layout', 'Formulas', 'Data', 'Review', 'View'];
+    : activeSubject === 'excel'
+    ? ['Home', 'Insert', 'Page Layout', 'Formulas', 'Data', 'Review', 'View']
+    : ['Home', 'Insert', 'Design', 'Transitions', 'Animations', 'Review', 'View'];
 
   return (
     <div className="space-y-6">
@@ -233,7 +265,7 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
                 Môi Trường Thực Hành GMetrix 365 Chuẩn 90%
               </span>
-              <span className="text-xs text-slate-400">· Chuẩn Khảo Thí Certiport MO-100 & MO-200</span>
+              <span className="text-xs text-slate-400">· Chuẩn Khảo Thí Certiport MO-100, MO-200 & MO-300</span>
             </div>
             <h2 className="text-2xl font-black mt-2 text-white flex items-center gap-2">
               {activeSubject === 'word' ? (
@@ -241,21 +273,26 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
                   <FileText className="w-6 h-6 text-blue-400" />
                   <span>1,000 Bài Tập Thực Hành MOS Word 365 (Certiport)</span>
                 </>
-              ) : (
+              ) : activeSubject === 'excel' ? (
                 <>
                   <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
                   <span>1,000 Bài Tập Thực Hành MOS Excel 365 (Certiport)</span>
                 </>
+              ) : (
+                <>
+                  <Presentation className="w-6 h-6 text-orange-400" />
+                  <span>1,000 Bài Tập Thực Hành MOS PowerPoint 365 (Certiport)</span>
+                </>
               )}
             </h2>
             <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-              Thao tác trực tiếp trên giao diện Ribbon Microsoft Office 365 chân thực. Mọi thay đổi về căn lề (Margins), giãn dòng, hàm số và bảng biểu sẽ phản hồi trực quan ngay trên tài liệu mẫu.
+              Thao tác trực tiếp trên giao diện Ribbon Microsoft Office 365 chân thực. Mọi thay đổi về căn lề (Margins), giãn dòng, hàm số, hiệu ứng Slide và bảng biểu sẽ phản hồi trực quan ngay trên tài liệu mẫu.
             </p>
           </div>
 
           {/* Switcher & Stats */}
           <div className="flex flex-col sm:flex-row items-center gap-3">
-            <div className="flex bg-slate-800/90 p-1 rounded-xl border border-slate-700 w-full sm:w-auto">
+            <div className="flex flex-wrap bg-slate-800/90 p-1 rounded-xl border border-slate-700 w-full sm:w-auto">
               <button
                 onClick={() => {
                   soundManager.playClick();
@@ -264,14 +301,14 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
                   setActiveRibbonTab('Layout');
                   handleResetTask();
                 }}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeSubject === 'word'
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <FileText className="w-4 h-4" />
-                <span>MOS Word (1,000)</span>
+                <FileText className="w-3.5 h-3.5" />
+                <span>Word (1,000)</span>
               </button>
               <button
                 onClick={() => {
@@ -281,14 +318,31 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
                   setActiveRibbonTab('Home');
                   handleResetTask();
                 }}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeSubject === 'excel'
                     ? 'bg-emerald-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>MOS Excel (1,000)</span>
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel (1,000)</span>
+              </button>
+              <button
+                onClick={() => {
+                  soundManager.playClick();
+                  setActiveSubject('powerpoint');
+                  setCurrentIndex(0);
+                  setActiveRibbonTab('Transitions');
+                  handleResetTask();
+                }}
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeSubject === 'powerpoint'
+                    ? 'bg-orange-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Presentation className="w-3.5 h-3.5" />
+                <span>PowerPoint (1,000)</span>
               </button>
             </div>
           </div>
@@ -303,7 +357,7 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
           <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-500 rounded-full ${
-                activeSubject === 'word' ? 'bg-blue-500' : 'bg-emerald-500'
+                activeSubject === 'word' ? 'bg-blue-500' : activeSubject === 'excel' ? 'bg-emerald-500' : 'bg-orange-500'
               }`}
               style={{ width: `${progressPercent}%` }}
             />
@@ -429,7 +483,7 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
               currentStyle={docStyleHeading}
             />
 
-            {/* 3. Live Authentic Word Document or Excel Worksheet Simulation */}
+            {/* 3. Live Authentic Word Document, Excel Worksheet, or PowerPoint Slide Simulation */}
             {activeSubject === 'word' ? (
               <WordDocumentView
                 margins={docMargins}
@@ -440,12 +494,18 @@ export const PracticalDrill1000: React.FC<PracticalDrill1000Props> = ({
                 hasTable={docHasTable}
                 selectedParagraph={2}
               />
-            ) : (
+            ) : activeSubject === 'excel' ? (
               <ExcelSheetView
                 activeFormula={excelActiveFormula}
                 hasTotalRow={excelHasTotalRow}
                 isTableFormatted={excelTableFormatted}
                 conditionalFormatted={excelConditionalFormatted}
+              />
+            ) : (
+              <PowerPointSlideView
+                slideTransition={pptTransition}
+                activeAnimation={pptAnimation}
+                hasSmartArt={pptHasSmartArt}
               />
             )}
           </div>

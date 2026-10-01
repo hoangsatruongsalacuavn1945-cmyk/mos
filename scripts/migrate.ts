@@ -155,7 +155,136 @@ export async function runMigration(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
     `);
 
-    // 6. SECURE VIEW: v_student_questions (Shields correct_answer from client DevTools)
+    // 6. TABLE: quiz_attempts (Tracks student quiz & exam attempts)
+    console.log('📦 [Migration] Creating table `quiz_attempts`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quiz_attempts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(100) NOT NULL,
+        user_name VARCHAR(150) NOT NULL,
+        user_email VARCHAR(255) NOT NULL,
+        subject VARCHAR(50) NOT NULL,
+        quiz_type VARCHAR(50) NOT NULL DEFAULT 'mock-exam',
+        score INT NOT NULL DEFAULT 0,
+        total_score INT NOT NULL DEFAULT 1000,
+        percentage NUMERIC(5, 2) NOT NULL DEFAULT 0,
+        passed BOOLEAN NOT NULL DEFAULT FALSE,
+        correct_count INT NOT NULL DEFAULT 0,
+        total_questions INT NOT NULL DEFAULT 0,
+        time_spent_seconds INT NOT NULL DEFAULT 0,
+        notes TEXT,
+        details JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_quiz_attempts_subject ON quiz_attempts(subject);
+      CREATE INDEX IF NOT EXISTS idx_quiz_attempts_created ON quiz_attempts(created_at DESC);
+    `);
+
+    // 7. TABLE: progress_updates (Tracks curriculum progress updates)
+    console.log('📦 [Migration] Creating table `progress_updates`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS progress_updates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(100) NOT NULL,
+        user_name VARCHAR(150) NOT NULL,
+        user_email VARCHAR(255) NOT NULL,
+        subject VARCHAR(50) NOT NULL,
+        lesson_id VARCHAR(100),
+        lesson_title VARCHAR(255),
+        completion_percentage NUMERIC(5, 2) NOT NULL DEFAULT 0,
+        total_lessons_completed INT NOT NULL DEFAULT 0,
+        streak_days INT NOT NULL DEFAULT 1,
+        details JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_progress_updates_user ON progress_updates(user_id);
+      CREATE INDEX IF NOT EXISTS idx_progress_updates_subject ON progress_updates(subject);
+      CREATE INDEX IF NOT EXISTS idx_progress_updates_created ON progress_updates(created_at DESC);
+    `);
+
+    // 8. TABLE: study_sessions (Tracks login & active study sessions)
+    console.log('📦 [Migration] Creating table `study_sessions`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS study_sessions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id VARCHAR(100) NOT NULL,
+        user_id VARCHAR(100) NOT NULL,
+        user_name VARCHAR(150) NOT NULL,
+        user_email VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'student',
+        session_type VARCHAR(50) NOT NULL DEFAULT 'study',
+        started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ended_at TIMESTAMPTZ,
+        duration_seconds INT NOT NULL DEFAULT 0,
+        device_info VARCHAR(255),
+        ip_address VARCHAR(50),
+        details JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_user ON study_sessions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_sid ON study_sessions(session_id);
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_started ON study_sessions(started_at DESC);
+    `);
+
+    // 9. TABLE: unified_activity_logs (Comprehensive transparent audit timeline)
+    console.log('📦 [Migration] Creating table `unified_activity_logs`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS unified_activity_logs (
+        id VARCHAR(100) PRIMARY KEY,
+        timestamp_vn VARCHAR(100) NOT NULL,
+        user_id VARCHAR(100) NOT NULL,
+        user_name VARCHAR(150) NOT NULL,
+        user_email VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        action VARCHAR(150) NOT NULL,
+        subject VARCHAR(100) NOT NULL,
+        details TEXT NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        score_metric VARCHAR(100),
+        session_id VARCHAR(100),
+        device_info VARCHAR(255),
+        raw_metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_unified_logs_user ON unified_activity_logs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_unified_logs_category ON unified_activity_logs(category);
+      CREATE INDEX IF NOT EXISTS idx_unified_logs_created ON unified_activity_logs(created_at DESC);
+    `);
+
+    // 10. TABLE: feedback_reports (Website feedback, bug reports & screen obstruction issues for owner)
+    console.log('📦 [Migration] Creating table `feedback_reports`...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS feedback_reports (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(100),
+        user_name VARCHAR(150),
+        user_email VARCHAR(255),
+        rating INT NOT NULL DEFAULT 5,
+        category VARCHAR(50) NOT NULL DEFAULT 'ui_rating',
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        device_info VARCHAR(255),
+        screen_resolution VARCHAR(100),
+        page_url VARCHAR(255),
+        priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        admin_notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback_reports(status);
+      CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback_reports(category);
+      CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback_reports(created_at DESC);
+    `);
+
+    // 11. SECURE VIEW: v_student_questions (Shields correct_answer from client DevTools)
     console.log('🛡️ [Migration] Creating secure view `v_student_questions`...');
     await client.query(`
       CREATE OR REPLACE VIEW v_student_questions AS

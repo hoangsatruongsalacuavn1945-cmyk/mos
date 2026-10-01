@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 export interface OfficeRibbonProps {
-  appType: 'word' | 'excel';
+  appType: 'word' | 'excel' | 'powerpoint';
   activeTab: string;
   onTabChange: (tab: string) => void;
   onExecuteCommand: (tab: string, command: string, param?: string) => void;
@@ -63,9 +63,11 @@ export const OfficeRibbon: React.FC<OfficeRibbonProps> = ({
   // Tabs by application
   const tabs = appType === 'word'
     ? ['Home', 'Insert', 'Design', 'Layout', 'References', 'Review', 'View']
-    : ['Home', 'Insert', 'Page Layout', 'Formulas', 'Data', 'Review', 'View'];
+    : appType === 'excel'
+    ? ['Home', 'Insert', 'Page Layout', 'Formulas', 'Data', 'Review', 'View']
+    : ['Home', 'Insert', 'Design', 'Transitions', 'Animations', 'Review', 'View'];
 
-  const themeBg = appType === 'word' ? 'bg-[#185abd]' : 'bg-[#107c41]';
+  const themeBg = appType === 'word' ? 'bg-[#185abd]' : appType === 'excel' ? 'bg-[#107c41]' : 'bg-[#d24726]';
 
   return (
     <div className="w-full bg-[#f3f4f6] border-b border-slate-300 font-sans select-none text-slate-800">
@@ -84,7 +86,11 @@ export const OfficeRibbon: React.FC<OfficeRibbonProps> = ({
             </button>
           </div>
           <span className="text-[11px] font-semibold text-white/90 border-l border-white/30 pl-3">
-            {appType === 'word' ? 'Báo Cáo Khảo Thí MOS Certiport 2026.docx - Word' : 'Bảng Điểm và Thống Kê Điểm Thi MOS 2026.xlsx - Excel'}
+            {appType === 'word'
+              ? 'Báo Cáo Khảo Thí MOS Certiport 2026.docx - Word'
+              : appType === 'excel'
+              ? 'Bảng Điểm và Thống Kê Điểm Thi MOS 2026.xlsx - Excel'
+              : 'Trình Chiếu Khảo Thí MOS Certiport 2026.pptx - PowerPoint'}
           </span>
         </div>
 
@@ -801,6 +807,106 @@ export const OfficeRibbon: React.FC<OfficeRibbonProps> = ({
                 </button>
               </div>
               <span className="text-[9px] text-slate-400 font-semibold text-center mt-1">Table of Contents</span>
+            </div>
+          </>
+        )}
+
+        {/* ========================================================================= */}
+        {/* POWERPOINT TRANSITIONS TAB */}
+        {/* ========================================================================= */}
+        {activeTab.toLowerCase() === 'transitions' && (
+          <>
+            <div className="flex flex-col justify-between border-r border-slate-200 pr-2 mr-1">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onExecuteCommand('Transitions', 'Transitions', 'Morph')}
+                  className="flex flex-col items-center p-1.5 bg-orange-50 border border-orange-300 text-orange-900 rounded font-bold min-w-[56px]"
+                >
+                  <span className="text-sm">🔄</span>
+                  <span className="text-[10px]">Morph</span>
+                </button>
+                <button
+                  onClick={() => onExecuteCommand('Transitions', 'Transitions', 'Push')}
+                  className="flex flex-col items-center p-1.5 hover:bg-slate-100 rounded text-slate-800"
+                >
+                  <span className="text-sm">⬆️</span>
+                  <span className="text-[10px]">Push</span>
+                </button>
+                <button
+                  onClick={() => onExecuteCommand('Transitions', 'Transitions', 'Wipe')}
+                  className="flex flex-col items-center p-1.5 hover:bg-slate-100 rounded text-slate-800"
+                >
+                  <span className="text-sm">🧹</span>
+                  <span className="text-[10px]">Wipe</span>
+                </button>
+              </div>
+              <span className="text-[9px] text-slate-400 font-semibold text-center mt-1">Transition to This Slide</span>
+            </div>
+
+            <div className="flex flex-col justify-between border-r border-slate-200 pr-2 mr-1">
+              <div className="space-y-1 text-[10px]">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-semibold">Duration:</span>
+                  <input type="text" readOnly value="1.50 s" className="w-14 border border-slate-300 rounded px-1 text-center bg-slate-50" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-semibold">Apply to All:</span>
+                  <button
+                    onClick={() => onExecuteCommand('Transitions', 'Apply to All', 'All Slides')}
+                    className="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 font-bold text-[9px]"
+                  >
+                    Áp Dụng Tất Cả
+                  </button>
+                </div>
+              </div>
+              <span className="text-[9px] text-slate-400 font-semibold text-center mt-1">Timing</span>
+            </div>
+          </>
+        )}
+
+        {/* ========================================================================= */}
+        {/* POWERPOINT ANIMATIONS TAB */}
+        {/* ========================================================================= */}
+        {activeTab.toLowerCase() === 'animations' && (
+          <>
+            <div className="flex flex-col justify-between border-r border-slate-200 pr-2 mr-1">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onExecuteCommand('Animations', 'Animations', 'Fly In')}
+                  className="flex flex-col items-center p-1.5 bg-orange-50 border border-orange-300 text-orange-900 rounded font-bold min-w-[56px]"
+                >
+                  <span className="text-sm">✈️</span>
+                  <span className="text-[10px]">Fly In</span>
+                </button>
+                <button
+                  onClick={() => onExecuteCommand('Animations', 'Animations', 'Fade')}
+                  className="flex flex-col items-center p-1.5 hover:bg-slate-100 rounded text-slate-800"
+                >
+                  <span className="text-sm">✨</span>
+                  <span className="text-[10px]">Fade</span>
+                </button>
+                <button
+                  onClick={() => onExecuteCommand('Animations', 'Animations', 'Zoom')}
+                  className="flex flex-col items-center p-1.5 hover:bg-slate-100 rounded text-slate-800"
+                >
+                  <span className="text-sm">🔍</span>
+                  <span className="text-[10px]">Zoom</span>
+                </button>
+              </div>
+              <span className="text-[9px] text-slate-400 font-semibold text-center mt-1">Animation</span>
+            </div>
+
+            <div className="flex flex-col justify-between border-r border-slate-200 pr-2 mr-1">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onExecuteCommand('Animations', 'Animation Pane', 'Open Pane')}
+                  className="flex flex-col items-center p-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded font-bold text-slate-800"
+                >
+                  <span className="text-sm">📑</span>
+                  <span className="text-[10px]">Animation Pane</span>
+                </button>
+              </div>
+              <span className="text-[9px] text-slate-400 font-semibold text-center mt-1">Advanced Animation</span>
             </div>
           </>
         )}

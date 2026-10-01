@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { getCurrentUser } from './userStore';
+import { unifiedLoggingService } from '../services/unifiedLoggingService';
 
 export type MOSSubjectTrack = 'word' | 'excel' | 'powerpoint';
 
@@ -304,8 +306,22 @@ export const useUserProgressStore = create<UserProgressStore>((set, get) => {
         };
       });
 
-      // Background cloud sync
+      // Background cloud sync and dual-write logging
       get().syncWithFirestore().catch(() => {});
+
+      const stats = get().getSubjectStats(subject);
+      const masterPct = get().getMasterProgressPercentage();
+      const lessonObj = CURRICULUM_LESSONS[subject]?.find(l => l.id === lessonId);
+
+      unifiedLoggingService.trackProgressUpdate({
+        subject,
+        lessonId,
+        lessonTitle: lessonObj?.title || lessonId,
+        subjectPct: stats.completionPercentage,
+        masterPct,
+        totalLessonsCompleted: get().getTotalCompletedLessonsCount(),
+        streakDays: 1,
+      }).catch((e) => console.warn('Progress update logging notice:', e));
     },
 
     uncompleteLesson: async (subject: MOSSubjectTrack, lessonId: string) => {
@@ -463,17 +479,14 @@ export const useUserProgressStore = create<UserProgressStore>((set, get) => {
 
     syncWithFirestore: async (customUserId?: string) => {
       try {
-        // Resolve active user id
+        // Resolve active user id consistently from userStore
         let userId = customUserId;
         if (!userId && typeof window !== 'undefined') {
-          const userRaw = localStorage.getItem('mos_current_user');
-          if (userRaw) {
-            const parsed = JSON.parse(userRaw);
-            userId = parsed.id || parsed.uid || parsed.email;
-          }
+          const user = getCurrentUser();
+          userId = user?.id || user?.email;
         }
 
-        if (!userId || userId === 'guest') {
+        if (!userId || userId === 'guest' || userId === 'stu-sample-1') {
           return; // Skip syncing guest or unauthenticated user
         }
 
