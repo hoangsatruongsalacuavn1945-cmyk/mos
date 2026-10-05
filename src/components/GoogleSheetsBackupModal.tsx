@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
 import { useAuthStore, AUTH_TOKEN_KEY } from '../utils/userStore';
 import { useUserProgressStore } from '../utils/userProgressStore';
@@ -20,7 +20,11 @@ import {
   Sparkles, 
   Check, 
   X,
-  FileText
+  FileText,
+  Zap,
+  Code2,
+  Copy,
+  Send
 } from 'lucide-react';
 
 interface GoogleSheetsBackupModalProps {
@@ -53,6 +57,99 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isServerBackingUp, setIsServerBackingUp] = useState(false);
   const [isMasterSyncing, setIsMasterSyncing] = useState(false);
+
+  const [autoSyncStats, setAutoSyncStats] = useState<{
+    totalSynced: number;
+    lastSyncedAt: string | null;
+    webhookUrl: string | null;
+    isAutoSyncEnabled: boolean;
+    pendingCount?: number;
+  }>({
+    totalSynced: 0,
+    lastSyncedAt: null,
+    webhookUrl: null,
+    isAutoSyncEnabled: true,
+    pendingCount: 0,
+  });
+  const [webhookInput, setWebhookInput] = useState('');
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestPinging, setIsTestPinging] = useState(false);
+  const [scriptTemplate, setScriptTemplate] = useState<string>('');
+  const [showScriptModal, setShowScriptModal] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const fetchAutoSyncStatus = async () => {
+    try {
+      const res = await fetch('/api/sheets/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.stats) {
+          setAutoSyncStats(data.stats);
+          if (data.stats.webhookUrl && !webhookInput) {
+            setWebhookInput(data.stats.webhookUrl);
+          }
+        }
+        if (data.scriptTemplate) {
+          setScriptTemplate(data.scriptTemplate);
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching auto sync status:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchAutoSyncStatus();
+    }
+  }, [isOpen]);
+
+  const handleSaveWebhook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    soundManager.playClick();
+    setIsSavingWebhook(true);
+    try {
+      const res = await fetch('/api/sheets/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookUrl: webhookInput.trim() }),
+      });
+      if (res.ok) {
+        soundManager.playCorrect();
+        setActionMessage('Đã lưu URL Webhook Google Apps Script tự động đồng bộ!');
+        fetchAutoSyncStatus();
+      }
+    } catch (err: any) {
+      soundManager.playWrong();
+      setActionMessage(`Lỗi lưu: ${err.message}`);
+    } finally {
+      setIsSavingWebhook(false);
+      setTimeout(() => setActionMessage(null), 5000);
+    }
+  };
+
+  const handleTestPing = async () => {
+    soundManager.playClick();
+    setIsTestPinging(true);
+    try {
+      const res = await fetch('/api/sheets/test-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userName: user.name || 'Quản trị viên' }),
+      });
+      if (res.ok) {
+        soundManager.playCorrect();
+        setActionMessage('Đã bắn thử 1 dòng dữ liệu vào luồng tự động đồng bộ Google Sheets!');
+        fetchAutoSyncStatus();
+      }
+    } catch (err: any) {
+      soundManager.playWrong();
+      setActionMessage(`Lỗi gửi: ${err.message}`);
+    } finally {
+      setIsTestPinging(false);
+      setTimeout(() => setActionMessage(null), 5000);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -241,6 +338,98 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
             <span>{actionMessage}</span>
           </div>
         )}
+
+        {/* 24/7 Zero-Touch Automated Sync Section */}
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-900 via-slate-900 to-blue-950 text-white border border-indigo-500/40 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300 shrink-0">
+                <Zap className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-white tracking-tight">
+                    Tự Động Đồng Bộ Google Sheets 24/7 (Không Cần Can Thiệp)
+                  </h3>
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Đang Chạy Tự Động
+                  </span>
+                </div>
+                <p className="text-xs text-indigo-200/80 mt-0.5">
+                  Mọi đăng ký, đăng nhập, nộp bài thi, tiến độ học tập và đánh giá đều được tự động lưu lên Google Sheets theo thời gian thực mà không cần người dùng thao tác.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleTestPing}
+                disabled={isTestPinging}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600/60 hover:bg-indigo-600 border border-indigo-400/40 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Bắn thử nghiệm 1 dòng dữ liệu lên Sheet"
+              >
+                <Send className={`w-3.5 h-3.5 ${isTestPinging ? 'animate-pulse' : ''}`} />
+                <span>{isTestPinging ? 'Đang gửi...' : 'Gửi Thử Nghiệm'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowScriptModal(true)}
+                className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Xem mã nguồn Google Apps Script"
+              >
+                <Code2 className="w-3.5 h-3.5 text-amber-300" />
+                <span>Mã Apps Script</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] text-indigo-300 font-medium block">Tổng Bản Ghi Đã Đồng Bộ</span>
+              <span className="text-lg font-black text-amber-300">{autoSyncStats.totalSynced} hàng</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] text-indigo-300 font-medium block">Lần Đồng Bộ Gần Nhất</span>
+              <span className="text-xs font-bold text-white truncate block mt-1">
+                {autoSyncStats.lastSyncedAt ? new Date(autoSyncStats.lastSyncedAt).toLocaleTimeString('vi-VN') : 'Sẵn sàng'}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] text-indigo-300 font-medium block">Hàng Đợi Chờ Xử Lý</span>
+              <span className="text-lg font-black text-emerald-300">{autoSyncStats.pendingCount ?? 0}</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] text-indigo-300 font-medium block">Kênh Đồng Bộ</span>
+              <span className="text-xs font-bold text-white truncate block mt-1">
+                {autoSyncStats.webhookUrl ? 'Apps Script Webhook' : 'Bảng Tính Master Hub'}
+              </span>
+            </div>
+          </div>
+
+          {/* Webhook Configuration Input */}
+          <form onSubmit={handleSaveWebhook} className="pt-2 border-t border-white/10 flex flex-col sm:flex-row gap-2">
+            <div className="flex-1">
+              <input
+                type="url"
+                value={webhookInput}
+                onChange={(e) => setWebhookInput(e.target.value)}
+                placeholder="Dán Webhook Apps Script (tùy chọn: https://script.google.com/macros/s/.../exec)"
+                className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/20 text-xs text-white placeholder:text-indigo-300/50 focus:outline-hidden focus:ring-2 focus:ring-amber-400 font-mono"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSavingWebhook}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {isSavingWebhook ? 'Đang lưu...' : 'Lưu Webhook Riêng'}
+            </button>
+          </form>
+        </div>
 
         {/* Connection Status Box */}
         <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
@@ -529,6 +718,66 @@ export const GoogleSheetsBackupModal: React.FC<GoogleSheetsBackupModalProps> = (
           </button>
         </div>
       </div>
+
+      {/* Google Apps Script 1-Click Code Viewer Modal */}
+      {showScriptModal && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-bold text-slate-900">
+                  Mã Nguồn Google Apps Script (Tự Động Đồng Bộ 100%)
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowScriptModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-2">
+              <p>
+                <strong>Hướng dẫn 3 bước đơn giản:</strong>
+              </p>
+              <ol className="list-decimal pl-5 space-y-1 text-slate-600">
+                <li>Mở Bảng tính Google Sheets của bạn &rarr; chọn menu <strong>Tiện ích mở rộng (Extensions) &rarr; Apps Script</strong>.</li>
+                <li>Dán toàn bộ đoạn mã bên dưới vào rồi bấm <strong>Triển khai (Deploy) &rarr; Triển khai mới (New deployment)</strong>.</li>
+                <li>Chọn loại: <strong>Ứng dụng web (Web app)</strong>, quyền: <strong>Bất kỳ ai (Anyone)</strong>, rồi sao chép URL dán vào ô Webhook.</li>
+              </ol>
+            </div>
+
+            <div className="relative flex-1 min-h-0 bg-slate-950 rounded-xl p-4 overflow-y-auto">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(scriptTemplate);
+                  setCopiedScript(true);
+                  soundManager.playCorrect();
+                  setTimeout(() => setCopiedScript(false), 2500);
+                }}
+                className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border border-white/20"
+              >
+                {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript ? 'Đã Sao Chép!' : 'Sao Chép Mã'}</span>
+              </button>
+              <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap pr-24">
+                {scriptTemplate}
+              </pre>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setShowScriptModal(false)}
+                className="px-5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800"
+              >
+                Đã Hiểu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

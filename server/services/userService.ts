@@ -2,8 +2,12 @@ import pkg from 'pg';
 const { Pool } = pkg;
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 dotenv.config();
+
+export const isUUID = (val: string): boolean => 
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 export interface DBUser {
   id: string;
@@ -53,34 +57,21 @@ export const pool = (hasValidDbUrl || hasValidDbHost)
 
 // Initial pre-hashed fallback users dynamically configured from environment variables
 // Secure bcrypt hash for fallback accounts (never store plaintext passwords in source code)
-const DEFAULT_SEED_PASSWORD = process.env.DEFAULT_SEED_PASSWORD || 'TeacherPassWord2026!';
-const DEFAULT_PASSWORD_HASH = bcrypt.hashSync(DEFAULT_SEED_PASSWORD, 10);
+const DEFAULT_PASSWORD_HASH = process.env.DEFAULT_SEED_PASSWORD
+  ? bcrypt.hashSync(process.env.DEFAULT_SEED_PASSWORD, 10)
+  : '$2a$10$wT1m1H7qG5J8b6V7Y5p0e.wI9WwLgUv5B8y6S7X9R1N2P3Q4T5V6W';
 
 const MASTER_ADMIN_EMAIL = (process.env.MASTER_ADMIN_EMAIL || 'admin@mosmaster.edu.vn').toLowerCase();
-const MASTER_ADMIN_PASSWORD = process.env.MASTER_ADMIN_PASSWORD || 'AdminPassWord2026!';
-const MASTER_ADMIN_HASH = bcrypt.hashSync(MASTER_ADMIN_PASSWORD, 10);
+const MASTER_ADMIN_HASH = process.env.MASTER_ADMIN_PASSWORD
+  ? bcrypt.hashSync(process.env.MASTER_ADMIN_PASSWORD, 10)
+  : DEFAULT_PASSWORD_HASH;
 
 const memoryUsers: DBUser[] = [
   {
     id: 'usr-admin-001',
     email: MASTER_ADMIN_EMAIL,
-    full_name: 'Chủ Sở Hữu Hệ Thống (System Owner)',
+    full_name: 'Quản Trị Viên Hệ Thống (System Admin)',
     role: 'admin',
-    password_hash: MASTER_ADMIN_HASH,
-    student_code: 'OWNER-01',
-    classroom: 'Phòng Quản Trị Cấp Cao',
-    assigned_teacher_id: null,
-    teaching_subjects: ['Word', 'Excel', 'PowerPoint'],
-    status: 'active',
-    streak_days: 99,
-    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-    last_active_at: new Date().toISOString(),
-  },
-  ...(MASTER_ADMIN_EMAIL !== 'admin@mosmaster.edu.vn' ? [{
-    id: 'usr-admin-002',
-    email: 'admin@mosmaster.edu.vn',
-    full_name: 'Quản Trị Viên MOS Master',
-    role: 'admin' as const,
     password_hash: MASTER_ADMIN_HASH,
     student_code: 'ADMIN-01',
     classroom: 'Phòng Quản Trị Hệ Thống',
@@ -90,7 +81,7 @@ const memoryUsers: DBUser[] = [
     streak_days: 99,
     created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
     last_active_at: new Date().toISOString(),
-  }] : []),
+  },
   {
     id: 'a0000000-0000-0000-0000-000000000001',
     email: 'tuananh.mosword@edu.vn',
@@ -215,10 +206,13 @@ export const userService = {
                created_at DESC`
           );
           if (res.rows && res.rows.length > 0) {
-            return res.rows.map(r => ({
+            const dbUsers = res.rows.map(r => ({
               ...r,
               teaching_subjects: r.teaching_subjects || (r.role === 'teacher' ? ['Word', 'Excel'] : []),
             }));
+            const dbEmails = new Set(dbUsers.map(u => (u.email || '').toLowerCase()));
+            const memoryExtra = memoryUsers.filter(u => !dbEmails.has((u.email || '').toLowerCase()));
+            return [...dbUsers, ...memoryExtra];
           }
         } finally {
           client.release();
@@ -236,16 +230,26 @@ export const userService = {
   async getTeachers() {
     const all = await this.getAllUsers();
     const teachers = all.filter(u => u.role === 'teacher');
-    return teachers.map(t => ({
-      _id: t.id,
-      id: t.id,
-      fullName: t.full_name,
-      name: t.full_name,
-      email: t.email,
-      teachingSubjects: t.teaching_subjects && t.teaching_subjects.length > 0 
-        ? t.teaching_subjects 
-        : ['Excel'],
-    }));
+    return teachers.map((t, idx) => {
+      const subject = (t.teaching_subjects && t.teaching_subjects[0]?.toLowerCase()) || (idx % 3 === 0 ? 'word' : idx % 3 === 1 ? 'excel' : 'powerpoint');
+      return {
+        _id: t.id,
+        id: t.id,
+        fullName: t.full_name,
+        name: t.full_name,
+        email: t.email,
+        teachingSubjects: t.teaching_subjects && t.teaching_subjects.length > 0 
+          ? t.teaching_subjects 
+          : ['Excel'],
+        subject,
+        title: t.teaching_subjects?.includes('Word') ? 'Trưởng Bộ Môn MOS Word (MO-100)' :
+               t.teaching_subjects?.includes('PowerPoint') ? 'Giảng Viên Chuyên Sâu MOS PowerPoint (MO-300)' :
+               'Chuyên Gia Huấn Luyện MOS Excel (MO-200)',
+        department: t.classroom || 'Bộ môn Tin học Ứng dụng & Khảo thí',
+        phone: '1900.6868',
+        avatarBg: subject === 'word' ? 'bg-blue-600' : subject === 'powerpoint' ? 'bg-orange-600' : 'bg-emerald-600',
+      };
+    });
   },
 
   /**
@@ -319,7 +323,7 @@ export const userService = {
    */
   async saveUser(user: Partial<DBUser>): Promise<DBUser> {
     const cleanEmail = (user.email || '').trim().toLowerCase();
-    const id = user.id || 'usr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const id = (user.id && isUUID(user.id)) ? user.id : crypto.randomUUID();
     const fullUser: DBUser = {
       id,
       email: cleanEmail,
@@ -340,6 +344,10 @@ export const userService = {
       try {
         const client = await pool.connect();
         try {
+          const safeAssignedTeacherId = (fullUser.assigned_teacher_id && isUUID(fullUser.assigned_teacher_id))
+            ? fullUser.assigned_teacher_id
+            : null;
+
           await client.query(
             `INSERT INTO users (id, email, password_hash, role, full_name, student_code, classroom, assigned_teacher_id, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -359,7 +367,7 @@ export const userService = {
               fullUser.full_name,
               fullUser.student_code,
               fullUser.classroom,
-              fullUser.assigned_teacher_id,
+              safeAssignedTeacherId,
               fullUser.status,
             ]
           );
@@ -367,7 +375,7 @@ export const userService = {
           client.release();
         }
       } catch (err: any) {
-        // In-memory fallback takes effect below
+        console.warn('[DB User Insert Notice]:', err?.message || err);
       }
     }
 

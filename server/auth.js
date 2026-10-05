@@ -13,8 +13,10 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import User from './models/User.ts';
 import { userService } from './services/userService.ts';
+import { auditLogService } from './services/auditLogService.ts';
 import { JWT_SECRET, getSafeJwtExpiresIn } from './config/jwt.ts';
 import { logger, auditLogger } from './config/logger.ts';
+import { googleSheetsAutoSyncService } from './services/googleSheetsAutoSyncService.ts';
 
 dotenv.config();
 
@@ -240,6 +242,25 @@ router.post('/register', registerRateLimiter, async (req, res) => {
       ip: req.ip,
     });
 
+    // Record user registration in audit trail for owner real-time dashboard
+    await auditLogService.log({
+      actorId: savedUser.id || savedUser._id || 'student-reg',
+      actorName: savedUser.fullName || actualName,
+      actorRole: 'student',
+      action: 'USER_REGISTERED',
+      targetType: 'user',
+      targetId: savedUser.id || savedUser._id,
+      targetName: savedUser.fullName || actualName,
+      details: {
+        email: savedUser.email,
+        studentCode: savedUser.studentCode,
+        classRoom: savedUser.classRoom,
+        assignedTeacherId: actualTeacherId,
+        registeredAt: new Date().toISOString(),
+      },
+      ipAddress: req.ip,
+    }).catch((e) => console.warn('Registration audit trail notice:', e));
+
     const token = generateToken({
       id: savedUser.id || savedUser._id,
       email: savedUser.email,
@@ -248,6 +269,17 @@ router.post('/register', registerRateLimiter, async (req, res) => {
       name: savedUser.fullName,
       studentCode: savedUser.studentCode,
       classRoom: savedUser.classRoom,
+    });
+
+    // 24/7 Automated Sync to Google Sheets
+    googleSheetsAutoSyncService.queueRegistration({
+      uid: savedUser.id || savedUser._id || savedUser.studentCode,
+      name: savedUser.fullName || actualName,
+      email: savedUser.email,
+      role: savedUser.role,
+      classRoom: savedUser.classRoom,
+      teacherName: actualTeacherId,
+      provider: 'Đăng ký hệ thống',
     });
 
     return res.status(201).json({
@@ -334,45 +366,18 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       }
     }
 
-    // Allow Master Admin password fallback strictly via verified environment or seed passwords
-    if (!isMatch && user.role === 'admin') {
-      const allowedAdminPasswords = [
-        process.env.MASTER_ADMIN_PASSWORD,
-        'AdminPassWord2026!',
-        'TeacherPassWord2026!',
-      ].filter(Boolean);
-      for (const pass of allowedAdminPasswords) {
-        if (password === pass) {
+    // Allow Master Admin password fallback strictly via hashed environment variable
+    if (!isMatch && user.role === 'admin' && process.env.MASTER_ADMIN_PASSWORD) {
+      try {
+        const envMasterHash = await bcrypt.hash(process.env.MASTER_ADMIN_PASSWORD, 10);
+        if (await bcrypt.compare(password, envMasterHash)) {
           isMatch = true;
-          break;
+          const salt = await bcrypt.genSalt(10);
+          user.password_hash = await bcrypt.hash(password, salt);
+          await user.save().catch(() => {});
         }
-      }
-    }
-
-    if (!isMatch && user.role === 'teacher') {
-      const allowedTeacherPasswords = [
-        process.env.DEFAULT_SEED_PASSWORD,
-        'TeacherPassWord2026!',
-      ].filter(Boolean);
-      for (const pass of allowedTeacherPasswords) {
-        if (password === pass) {
-          isMatch = true;
-          break;
-        }
-      }
-    }
-
-    if (!isMatch && user.role === 'student') {
-      const allowedStudentPasswords = [
-        process.env.DEFAULT_SEED_PASSWORD,
-        'StudentPassWord2026!',
-        'TeacherPassWord2026!',
-      ].filter(Boolean);
-      for (const pass of allowedStudentPasswords) {
-        if (password === pass) {
-          isMatch = true;
-          break;
-        }
+      } catch (adminErr) {
+        logger.error('[Auth Security] Admin env password verify error:', adminErr);
       }
     }
 
@@ -413,6 +418,15 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     // 3. Generate JWT Token with configured secret
     const token = generateToken(user);
     const isPrivileged = user.role === 'admin' || user.role === 'teacher';
+
+    // 24/7 Automated Sync to Google Sheets
+    googleSheetsAutoSyncService.queueLoginSession({
+      uid: user.id || user._id,
+      name: user.fullName || user.name,
+      email: user.email,
+      provider: 'Mật khẩu / JWT',
+      device: req.headers['user-agent']?.includes('Mobile') ? 'Mobile' : 'Desktop',
+    });
 
     return res.status(200).json({
       message: 'Đăng nhập thành công',
@@ -515,6 +529,24 @@ router.post('/quick-login', async (req, res) => {
         assignedTeacherId: assignedTeacherId || 'a0000000-0000-0000-0000-000000000002',
       });
       existing = await existing.save();
+
+      // Log quick-register in audit trail for owner
+      auditLogService.log({
+        actorId: existing.id || 'quick-login',
+        actorName: existing.fullName || name || 'Học Viên Mới',
+        actorRole: 'student',
+        action: 'USER_REGISTERED',
+        targetType: 'user',
+        targetId: existing.id,
+        targetName: existing.fullName,
+        details: {
+          email: existing.email,
+          studentCode: existing.studentCode,
+          classRoom: existing.classRoom,
+          loginMethod: 'Đăng nhập nhanh',
+        },
+        ipAddress: req.ip,
+      }).catch(() => {});
     }
 
     const token = generateToken({

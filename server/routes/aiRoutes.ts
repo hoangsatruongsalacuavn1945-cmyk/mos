@@ -3,7 +3,11 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { aiRateLimiter, getUserQuotaInfo } from '../middleware/aiRateLimiter.ts';
 import { generateOfflineMosAnswer } from '../services/aiFallbackService.ts';
-import { MOS_TUTOR_SYSTEM_INSTRUCTION } from '../constants/aiPrompts.ts';
+import { 
+  MOS_TUTOR_SYSTEM_INSTRUCTION, 
+  ROLE_SYSTEM_INSTRUCTIONS,
+  MOS_EXAM_EXPLANATION_PROMPT 
+} from '../constants/aiPrompts.ts';
 
 dotenv.config();
 
@@ -22,24 +26,32 @@ if (!apiKey) {
   console.warn('[Security Warning] GEMINI_API_KEY is not defined in server environment variables.');
 }
 
+// Initialized with mandatory User-Agent header as required by SDK guidelines
 const ai = new GoogleGenAI({
   apiKey,
   httpOptions: {
     headers: {
-      'User-Agent': 'aistudio-build-server',
+      'User-Agent': 'aistudio-build',
     },
   },
 });
 
 /**
  * Route: POST /api/gemini/chat
- * General AI tutor conversation proxy with Rate Limiting and Token Quota
+ * Multi-turn Gemini chatbot proxy with Role System Instruction, Model Selector, & Google Search Grounding
  */
 router.post('/chat', aiRateLimiter, async (req: Request, res: Response) => {
   try {
-    const { messages, subject } = req.body;
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Messages array is required.' });
+    const { 
+      messages, 
+      subject, 
+      systemRole = 'tutor',
+      taskType = 'general', // 'general' | 'fast' | 'complex'
+      enableSearch = true 
+    } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required and must not be empty.' });
     }
 
     if (!apiKey) {
@@ -48,38 +60,88 @@ router.post('/chat', aiRateLimiter, async (req: Request, res: Response) => {
       });
     }
 
-    const lastUserMessage = messages[messages.length - 1]?.content || '';
-    const conversationHistory = messages
-      .slice(0, -1)
-      .map(m => `${m.role === 'user' ? 'Học sinh' : 'Gia sư MOS'}: ${m.content}`)
-      .join('\n');
+    // Model selection based on task requirements:
+    // - gemini-3.1-pro-preview for particularly complex tasks
+    // - gemini-3.5-flash for general tasks
+    // - gemini-3.1-flash-lite for tasks that should happen fast
+    let model = 'gemini-3.5-flash';
+    if (taskType === 'complex' || req.body.model === 'gemini-3.1-pro-preview') {
+      model = 'gemini-3.1-pro-preview';
+    } else if (taskType === 'fast' || req.body.model === 'gemini-3.1-flash-lite') {
+      model = 'gemini-3.1-flash-lite';
+    } else {
+      model = 'gemini-3.5-flash';
+    }
 
-    const promptText = `
-Ngữ cảnh môn học đang ôn tập: ${subject || 'Tất cả (Word, Excel, PowerPoint)'}
+    // Role-specific System Instruction
+    const baseInstruction = ROLE_SYSTEM_INSTRUCTIONS[systemRole] || MOS_TUTOR_SYSTEM_INSTRUCTION;
+    const systemInstruction = `
+${baseInstruction}
 
-Lịch sử trò chuyện trước đó:
-${conversationHistory}
+Môn học trọng tâm hiện tại: ${subject ? subject.toUpperCase() : 'Tất Cả Môn (Word, Excel, PowerPoint)'}
+Quy tắc:
+- Trả lời bằng tiếng Việt thân thiện, chuẩn xác thuật ngữ Microsoft và Certiport.
+- Sử dụng định dạng Markdown phong phú (tiêu đề, in đậm, danh sách, khối mã code cho công thức hàm Excel).
+- Chỉ dẫn rõ ràng vị trí trên thanh Ribbon (ví dụ: Home > Styles hoặc Insert > Illustrations > SmartArt).
+- Nếu có phím tắt thông dụng, hãy nêu bật phím tắt đó.
+`.trim();
 
-Câu hỏi mới nhất của học sinh:
-"${lastUserMessage}"
+    // Map conversation history into multi-turn contents format
+    // Ensure alternating user and model turns, starting with user
+    const contents = messages.map((m: any) => ({
+      role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
+      parts: [{ text: String(m.content || '') }],
+    }));
 
-Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyên gia MOS Certiport.
-`;
+    // Configure tools: Enable Google Search Grounding for gemini-3.5-flash
+    const tools: any[] = [];
+    if (enableSearch && model === 'gemini-3.5-flash') {
+      tools.push({ googleSearch: {} });
+    }
 
+    const config: any = {
+      systemInstruction,
+      temperature: 0.7,
+    };
+
+    if (tools.length > 0) {
+      config.tools = tools;
+    }
+
+    // Call @google/genai SDK
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: promptText,
-      config: {
-        systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-      },
+      model,
+      contents,
+      config,
     });
 
-    return res.json({ reply: response.text });
+    const replyText = response.text || 'Xin lỗi, tôi chưa nhận được câu trả lời phù hợp.';
+
+    // Extract Google Search Grounding citations & metadata
+    const candidate = response.candidates?.[0];
+    const groundingChunks = candidate?.groundingMetadata?.groundingChunks || [];
+    const webSearchQueries = candidate?.groundingMetadata?.webSearchQueries || [];
+
+    const groundingSources = groundingChunks
+      .filter((chunk: any) => chunk.web && chunk.web.uri)
+      .map((chunk: any) => ({
+        title: chunk.web.title || 'Nguồn tham khảo Google Search',
+        uri: chunk.web.uri,
+      }));
+
+    return res.json({
+      reply: replyText,
+      modelUsed: model,
+      taskType,
+      systemRole,
+      groundingSources: groundingSources.length > 0 ? groundingSources : undefined,
+      searchQueries: webSearchQueries.length > 0 ? webSearchQueries : undefined,
+    });
+
   } catch (error: any) {
     console.error('[AI Proxy Error] /api/gemini/chat failed:', error?.message);
 
-    // Graceful fallback when Gemini quota/billing is exhausted or network fails
+    // Graceful offline fallback when Gemini quota is exhausted or network fails
     const lastUserMessage = req.body?.messages?.[req.body.messages.length - 1]?.content || '';
     const subject = req.body?.subject || '';
     const fallbackAnswer = generateOfflineMosAnswer(lastUserMessage, subject);
@@ -87,6 +149,7 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
     return res.json({
       reply: fallbackAnswer,
       isFallback: true,
+      modelUsed: 'offline-knowledge-base',
       notice: 'Hệ thống đang hoạt động với Cơ Sở Tri Thức Khảo Thí MOS Tích Hợp (Hạn mức Gemini Cloud tạm thời bận).',
     });
   }
@@ -94,7 +157,7 @@ Hãy trả lời chi tiết, súc tích và chuẩn xác theo phong cách chuyê
 
 /**
  * Route: POST /api/gemini/explain-question
- * Detailed explanation proxy for specific question review
+ * Detailed explanation proxy for specific question review (Uses gemini-3.5-flash with Search Grounding)
  */
 router.post('/explain-question', aiRateLimiter, async (req: Request, res: Response) => {
   try {
@@ -124,19 +187,31 @@ Yêu cầu phân tích:
 1. Tại sao đáp án trên lại là chuẩn xác nhất theo chuẩn Microsoft Office Specialist?
 2. Phân tích chi tiết đường dẫn trên thanh Ribbon và các phím tắt thay thế tương đương.
 3. Nếu học sinh làm sai, hãy chỉ ra bẫy thi thường gặp của câu này và mẹo ghi nhớ để không bị trừ điểm trong phòng thi thật.
-4. Trình bày ngắn gọn, sư phạm, chuyên nghiệp bằng tiếng Việt.
+4. Trình bày ngắn gọn, sư phạm, chuyên nghiệp bằng tiếng Việt với định dạng Markdown.
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.5-flash',
       contents: promptText,
       config: {
-        systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
-        temperature: 0.6,
+        systemInstruction: MOS_EXAM_EXPLANATION_PROMPT,
+        tools: [{ googleSearch: {} }],
+        temperature: 0.5,
       },
     });
 
-    return res.json({ explanation: response.text });
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const groundingSources = chunks
+      .filter((c: any) => c.web?.uri)
+      .map((c: any) => ({
+        title: c.web.title || 'Tài liệu Microsoft Docs',
+        uri: c.web.uri,
+      }));
+
+    return res.json({ 
+      explanation: response.text,
+      groundingSources: groundingSources.length > 0 ? groundingSources : undefined,
+    });
   } catch (error: any) {
     console.error('[AI Proxy Error] /api/gemini/explain-question failed:', error);
     return res.status(500).json({
@@ -147,7 +222,7 @@ Yêu cầu phân tích:
 
 /**
  * Route: POST /api/gemini/generate-practice
- * Dynamic practice task generator proxy
+ * Dynamic practice task generator proxy (Uses gemini-3.5-flash)
  */
 router.post('/generate-practice', aiRateLimiter, async (req: Request, res: Response) => {
   try {
@@ -184,7 +259,7 @@ Hãy trả về kết quả theo định dạng JSON hợp lệ duy nhất với
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.5-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,
@@ -209,7 +284,7 @@ Hãy trả về kết quả theo định dạng JSON hợp lệ duy nhất với
 
 /**
  * Route: POST /api/gemini/diagnose-weakness
- * Diagnostic analysis proxy for student weak areas
+ * Diagnostic analysis proxy for student weak areas (Uses gemini-3.5-flash)
  */
 router.post('/diagnose-weakness', async (req: Request, res: Response) => {
   try {
@@ -243,7 +318,7 @@ Hãy đưa ra:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-3.5-flash',
       contents: promptText,
       config: {
         systemInstruction: MOS_TUTOR_SYSTEM_INSTRUCTION,

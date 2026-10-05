@@ -596,6 +596,7 @@ export interface UserRegistrationBackupPayload {
   name?: string;
   email?: string;
   role?: string;
+  studentCode?: string;
   classRoom?: string;
   teacherName?: string;
   provider?: string;

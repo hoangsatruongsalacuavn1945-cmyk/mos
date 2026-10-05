@@ -1,4 +1,4 @@
-import { db } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, getDocs, query, where, doc, setDoc, limit } from 'firebase/firestore';
 import { Question, MOSSubject } from '../types/mos';
 import { THEORY_QUESTIONS } from '../data/theoryQuestions';
@@ -30,8 +30,8 @@ export async function seedQuestionsToFirestoreIfEmpty(): Promise<void> {
     const snap = await getDocs(query(questionsRef, limit(3)));
     
     if (snap.empty) {
-      console.log('Seeding initial questions to Firestore...');
-      // Take first 15 curated questions across Word, Excel, PowerPoint
+      console.log('[Firestore] Seeding initial questions to collection "questions"...');
+      // Take first 18 curated questions across Word, Excel, PowerPoint
       const seedList = THEORY_QUESTIONS.slice(0, 18);
       for (const q of seedList) {
         const docRef = doc(db, 'questions', q.id);
@@ -52,10 +52,10 @@ export async function seedQuestionsToFirestoreIfEmpty(): Promise<void> {
           updatedAt: new Date().toISOString(),
         });
       }
-      console.log('Successfully seeded questions to Firestore.');
+      console.log('[Firestore] Successfully seeded questions to collection "questions".');
     }
   } catch (err) {
-    console.warn('Seeding check deferred or handled gracefully:', err);
+    handleFirestoreError(err, OperationType.WRITE, 'questions');
   }
 }
 
@@ -102,7 +102,7 @@ export async function fetchQuestionsFromFirestore(
       return shuffleArray(firestoreQuestions).slice(0, maxQuestions);
     }
 
-    // Fallback to local THEORY_QUESTIONS if remote network is offline
+    // Fallback to local THEORY_QUESTIONS if remote collection is still populating
     const filtered = subject === 'all' 
       ? THEORY_QUESTIONS 
       : THEORY_QUESTIONS.filter(q => q.subject === subject);
@@ -125,7 +125,8 @@ export async function fetchQuestionsFromFirestore(
         points: q.points,
       }));
   } catch (error) {
-    console.warn('Error fetching questions from Firestore, using local fallback:', error);
+    handleFirestoreError(error, OperationType.LIST, 'questions');
+    
     const filtered = subject === 'all' 
       ? THEORY_QUESTIONS 
       : THEORY_QUESTIONS.filter(q => q.subject === subject);
@@ -145,5 +146,33 @@ export async function fetchQuestionsFromFirestore(
       shortcutTip: q.shortcutTip,
       points: q.points,
     }));
+  }
+}
+
+// Save Quiz score and student answers directly to Firestore collection 'quiz_scores'
+export async function saveQuizScoreToFirestore(scoreData: {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  subject: string;
+  score: number;
+  total: number;
+  percentage: number;
+  passed: boolean;
+  userAnswers: Record<string, string>;
+}): Promise<string> {
+  const scoreId = `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const path = `quiz_scores/${scoreId}`;
+  try {
+    const docRef = doc(db, 'quiz_scores', scoreId);
+    await setDoc(docRef, {
+      id: scoreId,
+      ...scoreData,
+      createdAt: new Date().toISOString(),
+    });
+    return scoreId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    return scoreId;
   }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TeacherProfile, UserProfile } from '../types/user';
 import { 
   getTeachers, 
+  fetchTeachersFromServer,
   addTeacher, 
   deleteTeacher, 
   updateTeacher, 
@@ -324,9 +325,23 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
     }
   };
 
-  // Fetch Teachers
-  const loadTeachers = () => {
-    setTeachers(getTeachers());
+  // Fetch Teachers from Server
+  const loadTeachers = async () => {
+    try {
+      const list = await fetchTeachersFromServer();
+      setTeachers(list);
+    } catch {
+      setTeachers(getTeachers());
+    }
+  };
+
+  // Full System Data Refresh
+  const handleRefreshAllData = async () => {
+    soundManager.playClick();
+    notify('Đang đồng bộ dữ liệu người dùng, giáo viên và nhật ký từ CSDL...');
+    await Promise.all([loadUsers(), loadAuditLogs(), loadTeachers()]);
+    soundManager.playCorrect();
+    notify('Đã làm mới dữ liệu toàn hệ thống thành công!');
   };
 
   useEffect(() => {
@@ -334,6 +349,15 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
       loadUsers();
       loadAuditLogs();
       loadTeachers();
+
+      // Live auto-polling every 12 seconds so new account registrations immediately update the dashboard
+      const interval = setInterval(() => {
+        loadUsers();
+        loadAuditLogs();
+        loadTeachers();
+      }, 12000);
+
+      return () => clearInterval(interval);
     }
   }, [isOwner]);
 
@@ -431,10 +455,11 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
       }),
     }).catch(() => {});
 
-    setTeachers(getTeachers());
+    loadTeachers();
+    loadUsers();
+    loadAuditLogs();
     setIsAddTeacherModalOpen(false);
     notify(`Đã bổ nhiệm thành công Giáo viên: ${newT.name}`);
-    loadAuditLogs();
   };
 
   // Delete Teacher Handler
@@ -461,10 +486,11 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
       }),
     }).catch(() => {});
 
-    setTeachers(getTeachers());
+    loadTeachers();
+    loadUsers();
+    loadAuditLogs();
     setDeleteConfirmTeacher(null);
     notify(`Đã xóa vĩnh viễn Giáo viên ${tName} khỏi hệ thống.`);
-    loadAuditLogs();
   };
 
   // ACCESS-PROTECTION LOCK SCREEN: If user is not Owner / Admin
@@ -552,6 +578,15 @@ export const OwnerPortal: React.FC<OwnerPortalProps> = ({
             </div>
 
             <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                onClick={handleRefreshAllData}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer border border-amber-500/40"
+                title="Làm mới dữ liệu người dùng, giáo viên và nhật ký từ CSDL"
+              >
+                <RefreshCw className="w-3.5 h-3.5 animate-spin-reverse" />
+                <span>Làm Mới CSDL</span>
+              </button>
+
               <a
                 href={useGoogleSheetsStore.getState().spreadsheetUrl || getMasterGoogleSheetUrl()}
                 target="_blank"

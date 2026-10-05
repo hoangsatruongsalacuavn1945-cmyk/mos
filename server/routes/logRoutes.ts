@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { studyLoggerService } from '../services/studyLoggerService.ts';
+import { googleSheetsAutoSyncService } from '../services/googleSheetsAutoSyncService.ts';
 
 const router = Router();
 
@@ -62,6 +63,24 @@ router.post('/quiz-attempt', async (req: Request, res: Response) => {
       details_extra: details,
     } as any);
 
+    // 24/7 Automatic Sync to Google Sheets without human intervention
+    googleSheetsAutoSyncService.queueQuizAttempt({
+      attemptId: saved.id,
+      uid: saved.userId,
+      name: saved.userName,
+      email: saved.userEmail,
+      subject: saved.subject,
+      quizType: saved.quizType,
+      score: saved.score,
+      totalScore: saved.totalScore,
+      percentage: saved.percentage,
+      passed: saved.passed,
+      correctCount: saved.correctCount,
+      totalQuestions: saved.totalQuestions,
+      durationSeconds: saved.timeSpentSeconds,
+      notes: saved.notes,
+    });
+
     return res.json({ success: true, record: saved });
   } catch (error: any) {
     console.error('[API Log Quiz Attempt Error]:', error);
@@ -119,6 +138,19 @@ router.post('/progress-update', async (req: Request, res: Response) => {
       scoreMetric: `${saved.completionPercentage}%`,
     });
 
+    // 24/7 Automatic Sync to Google Sheets
+    googleSheetsAutoSyncService.queueProgressUpdate({
+      uid: saved.userId,
+      name: saved.userName,
+      email: saved.userEmail,
+      subject: saved.subject,
+      lessonId: saved.lessonId,
+      subjectPct: saved.completionPercentage,
+      masterPct: Math.round(saved.completionPercentage / 3),
+      totalCompleted: saved.totalLessonsCompleted,
+      streak: saved.streakDays,
+    });
+
     return res.json({ success: true, record: saved });
   } catch (error: any) {
     console.error('[API Log Progress Update Error]:', error);
@@ -164,6 +196,18 @@ router.post('/study-session', async (req: Request, res: Response) => {
       deviceInfo,
       ipAddress: ipAddress || req.ip,
       details,
+    });
+
+    // 24/7 Automatic Sync to Google Sheets
+    googleSheetsAutoSyncService.queueLoginSession({
+      sessionId: saved.id,
+      uid: saved.userId,
+      name: saved.userName,
+      email: saved.userEmail,
+      device: req.body.deviceInfo || 'Desktop',
+      os: req.body.os || 'Windows',
+      browser: req.body.browser || 'Chrome',
+      screenResolution: req.body.screenResolution || '1920x1080',
     });
 
     return res.json({ success: true, record: saved });

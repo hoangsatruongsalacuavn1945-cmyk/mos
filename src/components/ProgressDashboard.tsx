@@ -21,6 +21,7 @@ import { useUserProgressStore, MOSSubjectTrack, CURRICULUM_LESSONS } from '../ut
 import { useAuthStore } from '../utils/userStore';
 import { useGoogleSheetsStore } from '../utils/googleSheetsStore';
 import { GoogleSheetsBackupModal } from './GoogleSheetsBackupModal';
+import { WeeklyStudyProgressChart } from './dashboard/WeeklyStudyProgressChart';
 import { 
   BarChart3, 
   Award, 
@@ -219,6 +220,9 @@ export const ProgressDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Featured Recharts Visual: Weekly Study Progress Across Word, Excel, and PowerPoint */}
+      <WeeklyStudyProgressChart />
 
       {/* Main Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

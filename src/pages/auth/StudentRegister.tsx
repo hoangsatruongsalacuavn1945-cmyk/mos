@@ -12,6 +12,8 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { appendUserRegistrationToSheet } from '../../services/googleSheetsService';
+import { getTeachers, saveCurrentUser, useAuthStore } from '../../utils/userStore';
+import { signInWithGoogle, syncFirebaseUserDoc } from '../../lib/firebase';
 
 interface ITeacher {
   _id: string;
@@ -40,19 +42,76 @@ export default function StudentRegister() {
   useEffect(() => {
     const fetchTeachers = async () => {
       try {
-        const response = await fetch('/api/auth/teachers');
+        const response = await fetch('/api/teachers');
         if (response.ok) {
           const data = await response.json();
-          setTeachers(data);
-        } else {
-          console.warn('Lỗi khi tải danh sách giáo viên từ API');
+          const list = Array.isArray(data) ? data : data.teachers || [];
+          if (list.length > 0) {
+            setTeachers(list.map((t: any) => ({
+              _id: t.id || t._id,
+              fullName: t.name || t.fullName,
+              teachingSubjects: t.teachingSubjects || [t.subject || 'Excel'],
+            })));
+            return;
+          }
         }
       } catch (err) {
-        console.error('Không thể tải danh sách giáo viên', err);
+        console.warn('Không thể tải giáo viên từ /api/teachers, dùng fallback', err);
       }
+      
+      const local = getTeachers();
+      setTeachers(local.map(t => ({
+        _id: t.id,
+        fullName: t.name,
+        teachingSubjects: [t.subject],
+      })));
     };
     fetchTeachers();
   }, []);
+
+  const handleGoogleSignUp = async () => {
+    setLoading(true);
+    setError('');
+    soundManager.playClick();
+    try {
+      const res = await signInWithGoogle();
+      if (!res || !res.user) {
+        setLoading(false);
+        return;
+      }
+      const fbUser = res.user;
+      const selectedTeacher = teachers.find(t => t._id === formData.teacherId) || teachers[0];
+
+      const synced = await syncFirebaseUserDoc(fbUser, {
+        displayName: fbUser.displayName || formData.fullName || 'Học Viên Google',
+        assignedTeacherId: selectedTeacher?._id || 't-excel-02',
+        assignedTeacherName: selectedTeacher?.fullName || 'ThS. Trần Thị Bích Mai',
+      });
+
+      const profile = {
+        id: synced.uid,
+        name: synced.displayName,
+        email: synced.email,
+        role: synced.role,
+        studentCode: synced.studentCode,
+        classRoom: synced.classRoom,
+        assignedTeacherId: selectedTeacher?._id || 't-excel-02',
+        assignedTeacherName: selectedTeacher?.fullName || 'ThS. Trần Thị Bích Mai',
+        createdAt: synced.createdAt,
+      };
+
+      saveCurrentUser(profile);
+      useAuthStore.getState().login(profile, res.accessToken);
+      soundManager.playCorrect();
+      setSuccessMsg('Đăng ký bằng Google thành công! Đang chuyển hướng...');
+      setTimeout(() => navigate('/'), 1200);
+    } catch (err: any) {
+      setError(err.message || 'Lỗi đăng ký bằng tài khoản Google');
+      soundManager.playWrong();
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -183,6 +242,30 @@ export default function StudentRegister() {
             <span className="font-semibold">{successMsg}</span>
           </div>
         )}
+
+        {/* Google Sign-in with Firebase Auth */}
+        <div>
+          <button
+            type="button"
+            onClick={handleGoogleSignUp}
+            disabled={loading}
+            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-xl border border-slate-700 shadow-xs flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            </svg>
+            <span>Đăng ký nhanh với Google (Firebase Auth)</span>
+          </button>
+
+          <div className="flex items-center gap-3 my-3">
+            <div className="flex-1 h-px bg-slate-800" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Hoặc nhập thông tin</span>
+            <div className="flex-1 h-px bg-slate-800" />
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>

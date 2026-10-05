@@ -13,6 +13,9 @@ import logRoutes from './server/routes/logRoutes.ts';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
 import { createMasteryRouter } from './server/routes/masteryRoutes.ts';
 import offlineRoutes from './server/routes/offlineRoutes.ts';
+import sheetsAutoSyncRoutes from './server/routes/sheetsAutoSyncRoutes.ts';
+import { userService } from './server/services/userService.ts';
+import { auditLogService } from './server/services/auditLogService.ts';
 import { fileGraderQueue } from './server/services/fileGraderQueue.ts';
 import { generateOfflineMosAnswer } from './server/services/aiFallbackService.ts';
 import { requireAuth } from './server/middleware/authMiddleware.ts';
@@ -86,6 +89,7 @@ app.use('/api/logs', logRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/mastery', createMasteryRouter(() => submissionsStore));
 app.use('/api/offline', offlineRoutes);
+app.use('/api/sheets', sheetsAutoSyncRoutes);
 
 // Explicit Service Worker Route with Root Scope Allowance Header
 app.get('/sw.js', (_req: Request, res: Response) => {
@@ -790,28 +794,85 @@ let teachersStore = [
   },
 ];
 
-app.get('/api/teachers', (_req: Request, res: Response) => {
-  return res.json({ teachers: teachersStore });
+app.get('/api/teachers', async (_req: Request, res: Response) => {
+  try {
+    const dbTeachers = await userService.getTeachers();
+    const existingEmails = new Set(teachersStore.map(t => (t.email || '').toLowerCase()));
+    dbTeachers.forEach(dt => {
+      if (!existingEmails.has((dt.email || '').toLowerCase())) {
+        teachersStore.push({
+          id: dt.id,
+          name: dt.name,
+          email: dt.email,
+          subject: (dt.subject || 'excel') as any,
+          title: dt.title || 'Giảng Viên Bộ Môn MOS',
+          department: dt.department || 'Bộ môn Tin học',
+          phone: dt.phone || '1900.6868',
+          avatarBg: dt.avatarBg || 'bg-blue-600',
+          createdAt: new Date().toISOString(),
+        });
+        existingEmails.add((dt.email || '').toLowerCase());
+      }
+    });
+
+    return res.json({ teachers: teachersStore });
+  } catch {
+    return res.json({ teachers: teachersStore });
+  }
 });
 
-app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response, next: NextFunction) => {
+app.post('/api/teachers', requireAuth(['admin']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = req.body;
     if (!data.name || !data.email) {
       return res.status(400).json({ error: 'Tên và email giảng viên là bắt buộc.' });
     }
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanName = data.name.trim();
+
+    // 1. Save to userService (PostgreSQL + memoryUsers) so the teacher becomes a real system user
+    const savedUser = await userService.saveUser({
+      full_name: cleanName,
+      email: cleanEmail,
+      role: 'teacher',
+      teaching_subjects: [data.subject === 'word' ? 'Word' : data.subject === 'powerpoint' ? 'PowerPoint' : 'Excel'],
+      classroom: data.department || 'Bộ môn Tin học Ứng dụng & Khảo thí',
+    });
+
     const newTeacher = {
-      id: data.id || 't-custom-' + Date.now(),
-      name: data.name,
-      email: data.email,
+      id: savedUser.id || data.id || 't-custom-' + Date.now(),
+      name: cleanName,
+      email: cleanEmail,
       subject: data.subject || 'excel',
       title: data.title || 'Giảng Viên Bộ Môn MOS',
       department: data.department || 'Bộ môn Tin học',
-      phone: data.phone || '0900.000.000',
-      avatarBg: data.avatarBg || 'bg-blue-600',
+      phone: data.phone || '1900.6868',
+      avatarBg: data.avatarBg || (data.subject === 'word' ? 'bg-blue-600' : data.subject === 'powerpoint' ? 'bg-orange-600' : 'bg-emerald-600'),
       createdAt: new Date().toISOString(),
     };
+
+    // Remove any duplicate with same email then unshift
+    teachersStore = teachersStore.filter(t => (t.email || '').toLowerCase() !== cleanEmail);
     teachersStore.unshift(newTeacher);
+
+    // 2. Audit Log
+    const actor = (req as any).user;
+    await auditLogService.log({
+      actorId: actor?.id || 'admin-system',
+      actorName: actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)',
+      actorRole: 'admin',
+      action: 'TEACHER_CREATED',
+      targetType: 'teacher',
+      targetId: newTeacher.id,
+      targetName: newTeacher.name,
+      details: {
+        email: newTeacher.email,
+        subject: newTeacher.subject,
+        department: newTeacher.department,
+        title: newTeacher.title,
+      },
+    });
+
     console.log(`[Owner Action] Added new teacher: ${newTeacher.name} (${newTeacher.email})`);
     return res.status(201).json({ success: true, teacher: newTeacher });
   } catch (err) {
@@ -819,7 +880,7 @@ app.post('/api/teachers', requireAuth(['admin']), (req: Request, res: Response, 
   }
 });
 
-app.put('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Response) => {
+app.put('/api/teachers/:id', requireAuth(['admin']), async (req: Request, res: Response) => {
   const { id } = req.params;
   const updates = req.body;
   const index = teachersStore.findIndex(t => t.id === id);
@@ -827,17 +888,43 @@ app.put('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Respons
     return res.status(404).json({ error: 'Không tìm thấy giảng viên.' });
   }
   teachersStore[index] = { ...teachersStore[index], ...updates };
+  if (updates.name || updates.department) {
+    await userService.saveUser({
+      id,
+      email: teachersStore[index].email,
+      full_name: teachersStore[index].name,
+      classroom: teachersStore[index].department,
+      role: 'teacher',
+    });
+  }
   console.log(`[Owner Action] Updated teacher: ${teachersStore[index].name}`);
   return res.json({ success: true, teacher: teachersStore[index] });
 });
 
-app.delete('/api/teachers/:id', requireAuth(['admin']), (req: Request, res: Response) => {
+app.delete('/api/teachers/:id', requireAuth(['admin']), async (req: Request, res: Response) => {
   const { id } = req.params;
-  const initialLen = teachersStore.length;
+  const target = teachersStore.find(t => t.id === id);
   teachersStore = teachersStore.filter(t => t.id !== id);
-  if (teachersStore.length === initialLen) {
-    return res.status(404).json({ error: 'Không tìm thấy giảng viên để xóa.' });
+
+  if (target) {
+    const existing = await userService.findUserByEmail(target.email);
+    if (existing) {
+      await userService.deleteUser(existing.id);
+    }
+
+    const actor = (req as any).user;
+    await auditLogService.log({
+      actorId: actor?.id || 'admin-system',
+      actorName: actor?.fullName || actor?.name || 'Quản Trị Viên (Admin)',
+      actorRole: 'admin',
+      action: 'TEACHER_DELETED',
+      targetType: 'teacher',
+      targetId: id,
+      targetName: target.name,
+      details: { email: target.email },
+    });
   }
+
   console.log(`[Owner Action] Deleted teacher ID: ${id}`);
   return res.json({ success: true, message: 'Đã xóa giảng viên thành công.' });
 });

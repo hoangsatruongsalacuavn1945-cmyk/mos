@@ -4,6 +4,7 @@ import { UserProfile } from '../types/user';
 import { soundManager } from '../utils/audio';
 import { unifiedLoggingService } from '../services/unifiedLoggingService';
 import confetti from 'canvas-confetti';
+import { ExamCountdownTimer } from './exam/ExamCountdownTimer';
 import { 
   Clock, 
   Award, 
@@ -360,33 +361,6 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
       }
     }
   };
-
-  // Timer countdown without updater side-effects
-  useEffect(() => {
-    if (isSubmitted || loading) return;
-
-    const timer = setInterval(() => {
-      setTimeLeftSeconds(prev => {
-        if (prev <= 1) {
-          return 0;
-        }
-        // Auto-save local draft
-        if (prev % 10 === 0) {
-          try {
-            localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({
-              sessionId,
-              subject: selectedSubject,
-              userAnswers,
-              timeLeftSeconds: prev - 1,
-            }));
-          } catch {}
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isSubmitted, loading, sessionId, userAnswers]);
 
   // Clean auto-submit when timer expires
   useEffect(() => {
@@ -895,15 +869,30 @@ export const ExamRoomView: React.FC<ExamRoomViewProps> = ({
             <span>{violationsCount === 0 ? 'Giám sát: An Toàn' : `Cảnh báo: ${violationsCount} vi phạm`}</span>
           </div>
 
-          {/* Countdown Clock */}
-          <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border font-mono font-bold text-sm sm:text-base ${
-            timeLeftSeconds < 300 
-              ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse' 
-              : 'bg-slate-900 border-slate-700 text-amber-400'
-          }`}>
-            <Clock className="w-4 h-4 text-amber-400" />
-            <span>{formatTime(timeLeftSeconds)}</span>
-          </div>
+          {/* Authentic Reusable Certiport Exam Timer with Pause/Resume & Visual Pressure Gauge */}
+          <ExamCountdownTimer
+            initialSeconds={50 * 60}
+            currentSeconds={timeLeftSeconds}
+            onTick={(sec) => {
+              setTimeLeftSeconds(sec);
+              if (sec % 10 === 0) {
+                try {
+                  localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({
+                    sessionId,
+                    subject: selectedSubject,
+                    userAnswers,
+                    timeLeftSeconds: sec,
+                  }));
+                } catch {}
+              }
+            }}
+            onExpire={handleSubmitExam}
+            variant="hud"
+            allowPause={true}
+            totalTasks={questions.length}
+            completedTasks={Object.keys(userAnswers).length}
+            examTitle={`Kỳ Thi Khảo Thí MOS ${selectedSubject.toUpperCase()}`}
+          />
 
           {/* Fullscreen Button */}
           <button

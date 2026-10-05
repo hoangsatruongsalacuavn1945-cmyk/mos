@@ -11,91 +11,168 @@ import {
   HelpCircle, 
   Lightbulb, 
   MessageSquare,
-  ChevronRight
+  Globe,
+  ExternalLink,
+  Zap,
+  Brain,
+  ShieldCheck,
+  ChevronDown
 } from 'lucide-react';
+import { soundManager } from '../utils/audio';
 
-interface Message {
+export interface GroundingSource {
+  title: string;
+  uri: string;
+}
+
+export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  modelUsed?: string;
+  groundingSources?: GroundingSource[];
 }
 
 interface AITutorChatProps {
-  selectedSubject: MOSSubject;
+  selectedSubject?: MOSSubject;
 }
+
+const STORAGE_KEY = 'mos_gemini_multi_turn_history';
+
+const ROLES = [
+  {
+    id: 'tutor',
+    name: 'Gia Sư Toàn Năng',
+    desc: 'Giải thích cặn kẽ từng bước, thân thiện, bao quát 3 môn Word, Excel, PPT.',
+    icon: Bot,
+    badge: 'Khuyên Dùng',
+  },
+  {
+    id: 'examiner',
+    name: 'Giám Khảo Khảo Thí',
+    desc: 'Chiến thuật thi 50 phút, các bẫy trừ điểm ngầm của Certiport và mẹo bấm lệnh nhanh.',
+    icon: ShieldCheck,
+    badge: 'Chiến Thuật',
+  },
+  {
+    id: 'excel_specialist',
+    name: 'Chuyên Gia Hàm Excel',
+    desc: 'Chuyên sâu hàm logic, mảng động, XLOOKUP, VLOOKUP, INDEX/MATCH, sửa lỗi #N/A.',
+    icon: Zap,
+    badge: 'Excel MO-200',
+  },
+  {
+    id: 'designer',
+    name: 'Thiết Kế Word & PPT',
+    desc: 'Chuyên Slide Master, Morph, Section Breaks, Mail Merge và chuẩn hóa văn bản.',
+    icon: Sparkles,
+    badge: 'Word & PPT',
+  },
+];
+
+const MODELS = [
+  {
+    id: 'gemini-3.5-flash',
+    taskType: 'general',
+    name: 'Gemini 3.5 Flash',
+    label: 'Tiêu Chuẩn (Có Google Search)',
+    desc: 'Nhanh, thông minh, hỗ trợ tra cứu thời gian thực bằng Google Search Grounding.',
+    badge: 'Khuyên dùng',
+  },
+  {
+    id: 'gemini-3.1-flash-lite',
+    taskType: 'fast',
+    name: 'Gemini 3.1 Flash-Lite',
+    label: 'Tốc Độ Cao (Fast)',
+    desc: 'Phản hồi cực nhanh, tối ưu hóa độ trễ cho các câu hỏi ngắn.',
+    badge: 'Siêu Tốc',
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    taskType: 'complex',
+    name: 'Gemini 3.1 Pro Preview',
+    label: 'Chuyên Sâu (Complex Reasoning)',
+    desc: 'Lý luận đa bước chuyên sâu, phân tích tình huống phức tạp trong đề thi MOS.',
+    badge: 'Chuyên Sâu',
+  },
+];
 
 const QUICK_PROMPTS = [
   {
     subject: 'excel',
-    label: 'Hàm VLOOKUP & IFERROR',
-    prompt: 'Hãy hướng dẫn cách dùng hàm VLOOKUP kết hợp IFERROR trong Excel để tránh hiển thị lỗi #N/A khi không tìm thấy dữ liệu trong đề thi MOS.',
+    label: 'Hàm VLOOKUP & XLOOKUP',
+    prompt: 'So sánh sự khác nhau giữa VLOOKUP và XLOOKUP trong đề thi Excel MO-200. Khi nào nên dùng hàm nào và cú pháp chuẩn ra sao?',
   },
   {
     subject: 'excel',
-    label: 'Cố định hàng & cột (Freeze Panes)',
-    prompt: 'Phân biệt giữa Freeze Top Row, Freeze First Column và Freeze Panes tự do theo ô đang chọn trong Excel.',
+    label: 'Bẫy tính toán Hàm IF & AND/OR',
+    prompt: 'Hướng dẫn lồng hàm IF với AND hoặc OR trong Excel để phân loại điểm học sinh chuẩn đề thi Certiport.',
   },
   {
     subject: 'word',
     label: 'Section Break vs Page Break',
-    prompt: 'Sự khác biệt giữa Page Break và Section Break (Next Page) trong Word là gì? Khi nào cần dùng Section Break trong đề thi MOS?',
+    prompt: 'Sự khác biệt giữa Page Break và Section Break (Next Page) trong Word là gì? Khi nào bắt buộc dùng Section Break?',
   },
   {
     subject: 'word',
-    label: 'Mục lục tự động (TOC)',
-    prompt: 'Các bước tạo Mục lục tự động (Table of Contents) chuẩn Certiport và cách cập nhật khi sửa tiêu đề tài liệu.',
+    label: 'Trộn Thư (Mail Merge) Bước-Từng-Bước',
+    prompt: 'Nêu các bước thực hiện Mail Merge từ danh sách Excel sang Word chuẩn xác không bị lỗi font chữ hoặc sai trường.',
   },
   {
     subject: 'powerpoint',
-    label: 'Hiệu ứng chuyển trang Morph',
-    prompt: 'Cách thiết lập hiệu ứng Morph trong PowerPoint 365 để các hình khối và chữ biến hình mượt mà giữa 2 slide.',
+    label: 'Slide Master & Chèn Logo',
+    prompt: 'Cách chèn Logo vào Slide Master để hiển thị trên tất cả slide trừ slide tiêu đề đầu tiên theo yêu cầu đề thi MO-300.',
   },
   {
     subject: 'powerpoint',
-    label: 'Slide Master nâng cao',
-    prompt: 'Slide Master trong PowerPoint hoạt động như thế nào? Cách chèn Logo lên tất cả các slide mà không cần chỉnh từng trang.',
+    label: 'Hiệu Ứng Chuyển Động Morph',
+    prompt: 'Điều kiện để hiệu ứng Morph hoạt động chính xác trong PowerPoint là gì? Cần đặt tên object như thế nào?',
   },
 ];
 
-export const AITutorChat: React.FC<AITutorChatProps> = ({ selectedSubject }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: `Xin chào! Tôi là **Gia Sư MOS AI** — chuyên gia đồng hành cùng bạn ôn luyện chứng chỉ tin học quốc tế Microsoft Office Specialist (Word, Excel, PowerPoint).
-
-Bạn có thể hỏi tôi bất kỳ điều gì:
-- 📌 Cách dùng và cú pháp các hàm Excel phức tạp (*VLOOKUP, INDEX/MATCH, COUNTIF, IF...*)
-- 📌 Vị trí các nút lệnh trên thanh Ribbon chuẩn khảo thí Certiport
-- 📌 Các bẫy thường gặp trong đề thi MOS và kinh nghiệm phân bổ 50 phút
-- 📌 Hướng dẫn giải quyết các task thực hành cụ thể`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ]);
-  const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [credits, setCredits] = useState<{ remaining: number | 'unlimited'; max: number | 'unlimited'; used: number } | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const fetchCredits = async () => {
+export const AITutorChat: React.FC<AITutorChatProps> = ({ selectedSubject = 'all' }) => {
+  // Load conversation history from localStorage
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
-      const res = await fetch('/api/gemini/credits');
-      if (res.ok) {
-        const data = await res.json();
-        setCredits({
-          remaining: data.remainingCredits,
-          max: data.maxQuota,
-          used: data.usedToday,
-        });
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-  };
+    return [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: `Xin chào! Tôi là **Gia Sư Trợ Giảng Gemini AI** của nền tảng luyện thi MOS Master (Word MO-100, Excel MO-200, PowerPoint MO-300).
 
+Tôi được tích hợp:
+- ⚡ **Đa vai trò chuyên môn hóa** (Gia sư, Giám khảo chiến thuật 50P, Chuyên gia Excel, Chuyên gia Thiết kế)
+- 🌐 **Google Search Grounding** tra cứu thông tin và phím tắt Office mới nhất
+- 🧠 **Mô hình Gemini 3 thế hệ mới** (3.5 Flash, 3.1 Flash-Lite, 3.1 Pro Preview)
+
+Hãy đặt câu hỏi hoặc chọn một trong các gợi ý bên dưới để bắt đầu!`,
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      },
+    ];
+  });
+
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<string>('tutor');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
+  const [enableSearch, setEnableSearch] = useState<boolean>(true);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Sync messages to localStorage
   useEffect(() => {
-    fetchCredits();
-  }, []);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch {}
+  }, [messages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -109,15 +186,13 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
     const text = (textToSend || inputValue).trim();
     if (!text || isLoading) return;
 
-    if (credits && credits.remaining === 0) {
-      return;
-    }
+    soundManager.playClick();
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
     };
 
     const newMessages = [...messages, userMessage];
@@ -126,39 +201,47 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
     setIsLoading(true);
 
     try {
+      const selectedModelObj = MODELS.find(m => m.id === selectedModel);
+
       const response = await fetch('/api/gemini/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           subject: selectedSubject === 'all' ? 'Tổng hợp Word, Excel, PowerPoint' : selectedSubject.toUpperCase(),
+          systemRole: selectedRole,
+          model: selectedModel,
+          taskType: selectedModelObj?.taskType || 'general',
+          enableSearch: enableSearch && selectedModel === 'gemini-3.5-flash',
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Lỗi kết nối AI');
+        throw new Error(data.message || data.error || 'Lỗi kết nối Gemini AI');
       }
 
-      const assistantMessage: Message = {
+      const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
         content: data.reply || 'Xin lỗi, tôi chưa nhận được câu trả lời phù hợp.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        modelUsed: data.modelUsed,
+        groundingSources: data.groundingSources,
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-      fetchCredits();
+      soundManager.playCorrect();
     } catch (error: any) {
-      const errorMessage: Message = {
+      soundManager.playWrong();
+      const errorMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
-        content: `⚠️ **Không thể hoàn tất**: ${error.message || 'Vui lòng thử lại sau.'}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: `⚠️ **Không thể hoàn tất**: ${error.message || 'Hệ thống bận, vui lòng thử lại sau.'}`,
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages(prev => [...prev, errorMessage]);
-      fetchCredits();
     } finally {
       setIsLoading(false);
     }
@@ -167,146 +250,224 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
   const handleCopyMessage = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
+    soundManager.playClick();
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleResetChat = () => {
-    setMessages([
-      {
+  const handleClearHistory = () => {
+    soundManager.playClick();
+    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử trò chuyện để bắt đầu cuộc hội thoại mới?')) {
+      const resetMsg: ChatMessage = {
         id: 'welcome-reset',
         role: 'assistant',
-        content: `Đã làm mới cuộc hội thoại! Bạn muốn ôn tập chủ đề hoặc môn học nào tiếp theo?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-    ]);
+        content: `Đã làm mới cuộc hội thoại! Bạn muốn ôn tập chuyên đề hoặc giải đáp thắc mắc nào tiếp theo?`,
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages([resetMsg]);
+      localStorage.removeItem(STORAGE_KEY);
+    }
   };
 
-  const relevantPrompts = QUICK_PROMPTS.filter(p => {
+  const filteredPrompts = QUICK_PROMPTS.filter(p => {
     if (selectedSubject === 'all') return true;
     return p.subject === selectedSubject;
   });
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 mb-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold text-blue-300 uppercase tracking-wider mb-2">
-            <Sparkles className="w-4 h-4 text-blue-400" />
-            <span>Trợ Lý Trí Tuệ Nhân Tạo Thông Minh</span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold mb-2">
-            Gia Sư MOS AI — Giải Đáp & Phân Tích
-          </h2>
-          <p className="text-xs sm:text-sm text-blue-100 max-w-2xl leading-relaxed">
-            Hỏi đáp trực tiếp mọi bài tập khó, phân tích cú pháp hàm Excel, chỉ đường dẫn Ribbon Certiport và hướng dẫn phương pháp làm bài đạt điểm tuyệt đối 1000/1000.
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 self-start md:self-auto">
-          {credits && (
-            <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-2xs ${
-              credits.remaining === 'unlimited'
-                ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-                : credits.remaining > 5
-                ? 'bg-blue-950/80 border-blue-500/40 text-blue-200'
-                : credits.remaining > 0
-                ? 'bg-amber-950/80 border-amber-500/40 text-amber-300'
-                : 'bg-red-950/80 border-red-500/40 text-red-300'
-            }`}>
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>
-                {credits.remaining === 'unlimited'
-                  ? 'Hạn mức: Vô hạn (Giảng viên)'
-                  : `Hạn mức hôm nay: ${credits.remaining}/${credits.max} lượt`}
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      
+      {/* Top Header Card */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-6 sm:p-7 border border-indigo-500/30 shadow-xl">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-400/40 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-amber-300" />
+                Gemini Multi-Turn AI
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                <Globe className="w-3 h-3" />
+                Google Search Grounding
               </span>
             </div>
-          )}
+
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Gia Sư Khảo Thí MOS — Trí Tuệ Nhân Tạo Gemini
+            </h2>
+            <p className="text-xs text-indigo-200/80 leading-relaxed">
+              Duy trì ngữ cảnh lịch sử trò chuyện đa lượt, phân tích chi tiết đường dẫn Ribbon, hướng dẫn cú pháp hàm Excel và giải đáp đề thi Certiport theo thời gian thực.
+            </p>
+          </div>
 
           <button
-            onClick={handleResetChat}
-            className="px-3 py-1.5 bg-blue-800/80 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-blue-700 cursor-pointer shadow-2xs"
+            onClick={handleClearHistory}
+            className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 self-start md:self-auto"
+            title="Bắt đầu phiên hội thoại mới"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Làm mới hội thoại</span>
+            <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
+            <span>Làm Mới Chat</span>
           </button>
         </div>
       </div>
 
-      {/* Quick Prompts Bar */}
-      <div className="mb-6">
-        <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-          <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-          <span>Gợi ý câu hỏi ôn tập nhanh:</span>
-        </div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          {relevantPrompts.map((qp, idx) => (
+      {/* Control Toolbar: Roles, Model Selector, & Google Search Toggle */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          
+          {/* 1. Role Selector */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Bot className="w-3.5 h-3.5 text-indigo-600" />
+              Vai Trò Gia Sư (System Instruction)
+            </label>
+            <div className="relative">
+              <select
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value)}
+                className="w-full appearance-none px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer pr-8"
+              >
+                {ROLES.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.badge})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* 2. Model Selector */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Brain className="w-3.5 h-3.5 text-blue-600" />
+              Mô Hình Gemini (Model Tier)
+            </label>
+            <div className="relative">
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full appearance-none px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer pr-8"
+              >
+                {MODELS.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} — {m.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* 3. Search Grounding Toggle */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Globe className="w-3.5 h-3.5 text-emerald-600" />
+              Google Search Grounding
+            </label>
             <button
-              key={idx}
-              onClick={() => handleSendMessage(qp.prompt)}
-              className="px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shadow-2xs flex items-center gap-1 shrink-0"
+              type="button"
+              onClick={() => {
+                soundManager.playClick();
+                setEnableSearch(!enableSearch);
+              }}
+              disabled={selectedModel !== 'gemini-3.5-flash'}
+              className={`w-full px-3 py-2 rounded-xl border text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                enableSearch && selectedModel === 'gemini-3.5-flash'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 opacity-80'
+              }`}
             >
-              <span>{qp.label}</span>
-              <ChevronRight className="w-3 h-3 text-slate-400" />
+              <span className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${enableSearch && selectedModel === 'gemini-3.5-flash' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                {enableSearch && selectedModel === 'gemini-3.5-flash' ? 'Bật Tra Cứu Google' : 'Tắt Tra Cứu Google'}
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                {selectedModel === 'gemini-3.5-flash' ? 'googleSearch' : 'Chỉ hỗ trợ 3.5 Flash'}
+              </span>
             </button>
-          ))}
+          </div>
+
         </div>
       </div>
 
-      {/* Main Chat Interface */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden flex flex-col h-[580px]">
-        {/* Messages Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
-          {messages.map(msg => {
-            const isUser = msg.role === 'user';
+      {/* Main Chat Thread (Scrollable) */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col h-[580px]">
+        
+        {/* Messages list */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          {messages.map((message) => {
+            const isUser = message.role === 'user';
 
             return (
               <div
-                key={msg.id}
-                className={`flex gap-3 max-w-3xl ${isUser ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
+                key={message.id}
+                className={`flex gap-3 items-start ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
               >
                 {/* Avatar */}
                 <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
                     isUser
                       ? 'bg-blue-600 text-white'
-                      : 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white'
                   }`}
                 >
                   {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                 </div>
 
                 {/* Message Bubble */}
-                <div
-                  className={`relative rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                    isUser
-                      ? 'bg-blue-600 text-white rounded-tr-none'
-                      : 'bg-slate-50 border border-slate-200 text-slate-800 rounded-tl-none'
-                  }`}
-                >
-                  {/* Markdown formatted content */}
-                  <div className="whitespace-pre-wrap font-sans text-xs sm:text-sm">
-                    {msg.content}
-                  </div>
-
-                  {/* Message footer */}
+                <div className={`max-w-[85%] sm:max-w-[75%] space-y-2`}>
                   <div
-                    className={`mt-2 pt-1.5 flex items-center justify-between gap-3 text-[10px] ${
-                      isUser ? 'text-blue-200' : 'text-slate-400 border-t border-slate-200/60'
+                    className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs ${
+                      isUser
+                        ? 'bg-blue-600 text-white rounded-tr-none'
+                        : 'bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-tl-none'
                     }`}
                   >
-                    <span>{msg.timestamp}</span>
+                    <div className="whitespace-pre-wrap font-sans">{message.content}</div>
 
+                    {/* Grounding Sources (Search citations) */}
+                    {message.groundingSources && message.groundingSources.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                          <Globe className="w-3.5 h-3.5" />
+                          <span>Nguồn Tra Cứu Google Search Grounding:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {message.groundingSources.map((src, idx) => (
+                            <a
+                              key={idx}
+                              href={src.uri}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[11px] text-blue-600 dark:text-blue-300 hover:text-blue-800 hover:underline transition-colors"
+                            >
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[200px]">{src.title}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Message meta */}
+                  <div className={`flex items-center gap-2 text-[10px] text-slate-400 px-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <span>{message.timestamp}</span>
+                    {message.modelUsed && (
+                      <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[9px]">
+                        {message.modelUsed}
+                      </span>
+                    )}
                     {!isUser && (
                       <button
-                        onClick={() => handleCopyMessage(msg.id, msg.content)}
-                        className="hover:text-slate-700 flex items-center gap-1 transition-colors"
-                        title="Sao chép nội dung"
+                        onClick={() => handleCopyMessage(message.id, message.content)}
+                        className="hover:text-slate-600 dark:hover:text-slate-200 flex items-center gap-0.5 cursor-pointer ml-1"
+                        title="Sao chép câu trả lời"
                       >
-                        {copiedId === msg.id ? (
+                        {copiedId === message.id ? (
                           <>
-                            <Check className="w-3 h-3 text-emerald-600" />
-                            <span>Đã chép</span>
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            <span className="text-emerald-500 font-semibold">Đã chép</span>
                           </>
                         ) : (
                           <>
@@ -322,15 +483,15 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
             );
           })}
 
-          {/* Typing Indicator */}
+          {/* Loading indicator */}
           {isLoading && (
-            <div className="flex gap-3 max-w-xl mr-auto">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <div className="flex gap-3 items-start">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center shrink-0 animate-pulse">
                 <Bot className="w-4 h-4" />
               </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-none px-4 py-3 text-xs text-slate-500 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                <span>Gia Sư MOS AI đang suy nghĩ và tổng hợp kiến thức...</span>
+              <div className="p-4 rounded-2xl rounded-tl-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs text-slate-500">
+                <Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
+                <span>Gia sư Gemini đang suy luận & tổng hợp câu trả lời...</span>
               </div>
             </div>
           )}
@@ -338,49 +499,56 @@ Bạn có thể hỏi tôi bất kỳ điều gì:
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Bar */}
-        <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200">
-          {credits && credits.remaining === 0 && (
-            <div className="mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-semibold flex items-center gap-2">
-              <Lightbulb className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Bạn đã sử dụng hết 20/20 lượt hỏi AI hôm nay. Hãy tiếp tục ôn tập theo ngân hàng câu hỏi và quay lại vào ngày mai nhé!</span>
-            </div>
-          )}
-
-          <form
-            onSubmit={e => {
-              e.preventDefault();
-              handleSendMessage();
-            }}
-            className="flex items-center gap-2"
-          >
-            <input
-              type="text"
-              placeholder={
-                credits && credits.remaining === 0
-                  ? 'Đã hết lượt hỏi hôm nay (Đặt lại vào 00:00 ngày mai)...'
-                  : `Đặt câu hỏi về ${selectedSubject === 'all' ? 'Word, Excel, PowerPoint' : selectedSubject.toUpperCase()}... (Ví dụ: cú pháp hàm XLOOKUP, cách ngắt section...)`
-              }
-              value={inputValue}
-              onChange={e => setInputValue(e.target.value)}
-              disabled={isLoading || (credits ? credits.remaining === 0 : false)}
-              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
-            />
-
+        {/* Quick Prompts Chips Bar */}
+        <div className="p-2.5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 overflow-x-auto flex items-center gap-1.5 scrollbar-none">
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 px-2 flex items-center gap-1">
+            <Lightbulb className="w-3 h-3 text-amber-500" />
+            Gợi ý:
+          </span>
+          {filteredPrompts.map((qp, idx) => (
             <button
-              type="submit"
-              disabled={!inputValue.trim() || isLoading || (credits ? credits.remaining === 0 : false)}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-colors shadow-xs flex items-center gap-1.5 shrink-0"
+              key={idx}
+              type="button"
+              onClick={() => handleSendMessage(qp.prompt)}
+              disabled={isLoading}
+              className="px-3 py-1.5 rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:border-indigo-400 dark:hover:border-indigo-500 text-slate-700 dark:text-slate-300 text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 shadow-2xs hover:text-indigo-600"
             >
-              <span>Gửi</span>
-              <Send className="w-3.5 h-3.5" />
+              {qp.label}
             </button>
-          </form>
-          <div className="text-[11px] text-slate-400 mt-2 text-center">
-            Gia sư MOS AI trả lời theo tài liệu chuẩn khảo thí Certiport & Microsoft Office 365.
-          </div>
+          ))}
         </div>
+
+        {/* Chat Input Field */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendMessage();
+          }}
+          className="p-3 sm:p-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2"
+        >
+          <input
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="Hỏi về hàm Excel, Ribbon Word, Slide Master, mẹo thi 50 phút..."
+            disabled={isLoading}
+            className="flex-1 px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-indigo-500 dark:focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden transition-colors"
+          />
+
+          <button
+            type="submit"
+            disabled={isLoading || !inputValue.trim()}
+            className="p-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0"
+            title="Gửi câu hỏi"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+
       </div>
+
     </div>
   );
 };
+
+export default AITutorChat;

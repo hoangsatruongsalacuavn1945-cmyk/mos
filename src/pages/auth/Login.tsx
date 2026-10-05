@@ -5,7 +5,7 @@ import { useUserProgressStore } from '../../utils/userProgressStore';
 import { useGoogleSheetsStore } from '../../utils/googleSheetsStore';
 import { saveStoredGoogleToken, appendUserRegistrationToSheet } from '../../services/googleSheetsService';
 import { soundManager } from '../../utils/audio';
-import { signInWithGoogle, db } from '../../lib/firebase';
+import { signInWithGoogle, syncFirebaseUserDoc, db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   LogIn,
@@ -73,39 +73,10 @@ export default function Login() {
         saveStoredGoogleToken(result.accessToken);
       }
 
-      // Check or create user profile in Firestore
-      const userDocRef = doc(db, 'users', fbUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-
-      let role: any = 'student';
-      let displayName = fbUser.displayName || 'Học viên Google';
-
-      if (userDocSnap.exists()) {
-        const existingData = userDocSnap.data();
-        role = existingData.role || 'student';
-        displayName = existingData.displayName || displayName;
-      } else {
-        // Save new user profile to Firestore
-        await setDoc(userDocRef, {
-          uid: fbUser.uid,
-          email: fbUser.email,
-          displayName,
-          role: 'student',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-
-        // Automatically backup new account creation to the master Google Sheet
-        appendUserRegistrationToSheet({
-          uid: fbUser.uid,
-          name: displayName,
-          email: fbUser.email || '',
-          role: 'student',
-          classRoom: 'Lớp MOS Master Quốc Tế',
-          teacherName: 'Trung Tâm Khảo Thí',
-          provider: 'Google Sign-In (Khởi Tạo)',
-        }).catch((e) => console.warn('Google Sheets auto-register warning:', e));
-      }
+      // Initialize or sync user profile in Firestore
+      const syncedUser = await syncFirebaseUserDoc(fbUser);
+      const role = syncedUser.role;
+      const displayName = syncedUser.displayName;
 
       // Sync progress from Firestore for this user
       await useUserProgressStore.getState().loadFromFirestore(fbUser.uid);
@@ -284,56 +255,8 @@ export default function Login() {
         <div className="relative flex items-center justify-center pt-1 pb-1">
           <div className="border-t border-slate-800 w-full" />
           <span className="bg-slate-900 px-3 text-[10px] uppercase tracking-wider text-slate-500 font-bold absolute">
-            hoặc đăng nhập nhanh
+            hoặc đăng nhập bằng google
           </span>
-        </div>
-
-        {/* Quick Demo Fill Buttons for Testing & Admin Access */}
-        <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-2">
-          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            Tài Khoản Mẫu Trải Nghiệm 1-Chạm:
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                soundManager.playClick();
-                setFormData({
-                  email: 'admin@mosmaster.edu.vn',
-                  password: 'AdminPassWord2026!',
-                });
-              }}
-              className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold transition-all text-center cursor-pointer"
-            >
-              👑 Admin / Chủ Sở Hữu
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundManager.playClick();
-                setFormData({
-                  email: 'tuananh.mosword@edu.vn',
-                  password: 'TeacherPassWord2026!',
-                });
-              }}
-              className="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-all text-center cursor-pointer"
-            >
-              🎓 Giảng Viên
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundManager.playClick();
-                setFormData({
-                  email: 'hoangson.k24@student.edu.vn',
-                  password: 'StudentPassWord2026!',
-                });
-              }}
-              className="p-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition-all text-center cursor-pointer"
-            >
-              🎒 Học Viên
-            </button>
-          </div>
         </div>
 
         {/* Google Sign-In with Firebase Auth */}

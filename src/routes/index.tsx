@@ -8,6 +8,8 @@ import ProtectedRoute from './ProtectedRoute';
 import Home from '../pages/student/Home';
 import ExamRoom from '../pages/student/ExamRoom';
 import Result from '../pages/student/Result';
+import Profile from '../pages/student/Profile';
+import StudentProgressDashboardLayout from '../components/dashboard/StudentProgressDashboardLayout';
 
 // Auth Pages
 import Login from '../pages/auth/Login';
@@ -26,10 +28,19 @@ export const AppRoutes: React.FC = () => {
   return (
     <Routes>
       {/* PUBLIC ROUTES - HỌC SINH VÀ KHÁCH VÀO TỰ DO */}
+      <Route path="/tien-do" element={<StudentProgressDashboardLayout />} />
+      <Route path="/progress" element={<StudentProgressDashboardLayout />} />
+
       <Route element={<StudentLayout />}>
         <Route path="/" element={<Home />} />
+        <Route path="/courses" element={<Home />} />
+        <Route path="/khoa-hoc" element={<Home />} />
         <Route path="/thi-thu" element={<ExamRoom />} />
+        <Route path="/practice-tests" element={<ExamRoom />} />
         <Route path="/ket-qua" element={<Result />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/ho-so" element={<Profile />} />
+        <Route path="/dashboard" element={<StudentProgressDashboardLayout />} />
         {/* Đăng ký học viên và Đăng nhập bảo mật cho cán bộ */}
         <Route path="/register" element={<StudentRegister />} />
         <Route path="/dang-ky" element={<StudentRegister />} />

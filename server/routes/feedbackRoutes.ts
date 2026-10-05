@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { feedbackService } from '../services/feedbackService.ts';
+import { googleSheetsAutoSyncService } from '../services/googleSheetsAutoSyncService.ts';
 
 const router = Router();
 
@@ -39,6 +40,20 @@ router.post('/', async (req: Request, res: Response) => {
       screenResolution,
       pageUrl,
       priority: priority || 'normal',
+    });
+
+    // 24/7 Automatic Sync to Google Sheets
+    googleSheetsAutoSyncService.queueFeedback({
+      id: saved.id,
+      name: saved.userName,
+      email: saved.userEmail,
+      category: saved.category,
+      rating: saved.rating,
+      title: saved.title,
+      description: saved.description,
+      deviceInfo: saved.deviceInfo,
+      resolution: saved.screenResolution,
+      pageUrl: saved.pageUrl,
     });
 
     return res.status(201).json({

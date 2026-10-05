@@ -18,6 +18,7 @@ import { MOSCertificateModal } from '../../components/MOSCertificateModal';
 import { SupervisorReportModal } from '../../components/SupervisorReportModal';
 import { GoogleSheetsBackupModal } from '../../components/GoogleSheetsBackupModal';
 import { FeedbackModal } from '../../components/FeedbackModal';
+import { ExamTimerSimulatorModal } from '../../components/exam/ExamTimerSimulatorModal';
 import { MasteryProgressDashboard } from '../../components/dashboard/MasteryProgressDashboard';
 import { OfflineStudyManagerModal } from '../../components/offline/OfflineStudyManagerModal';
 import { useOfflineSync } from '../../hooks/useOfflineSync';
@@ -76,6 +77,7 @@ export const Home: React.FC = () => {
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isOfflineManagerOpen, setIsOfflineManagerOpen] = useState(false);
+  const [isTimerSimulatorOpen, setIsTimerSimulatorOpen] = useState(false);
 
   const { isOnline, status: offlineStatus } = useOfflineSync();
   const [certificateInfo, setCertificateInfo] = useState<{ subject: string; score: number }>({
@@ -548,7 +550,7 @@ export const Home: React.FC = () => {
                 </div>
 
                 {/* Quick Cards to Practice Modes */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                   <div 
                     onClick={() => setPracticeSubTab('quiz_engine')}
                     className="p-4 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer group"
@@ -580,6 +582,23 @@ export const Home: React.FC = () => {
                     </div>
                     <h3 className="font-bold text-sm text-slate-900 group-hover:text-purple-700">Chấm File Tự Động</h3>
                     <p className="text-xs text-slate-500 mt-1">Nộp tệp bài làm .xlsx hoặc .docx để AI chấm điểm tức thì.</p>
+                  </div>
+
+                  <div 
+                    onClick={() => {
+                      soundManager.playClick();
+                      setIsTimerSimulatorOpen(true);
+                    }}
+                    className="p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-transform">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="font-bold text-sm text-slate-900 group-hover:text-amber-700">Đồng Hồ Áp Lực Thi MOS</h3>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-800">Mới</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Đếm ngược trực quan, tạm dừng bảo mật & mô phỏng áp lực 50p.</p>
                   </div>
                 </div>
               </div>
@@ -710,6 +729,12 @@ export const Home: React.FC = () => {
         onStartExam={(subject) => {
           navigate(`/thi-thu?subject=${subject}`);
         }}
+      />
+
+      {/* Reusable Exam Pressure Timer & Security Pause Simulator Modal */}
+      <ExamTimerSimulatorModal
+        isOpen={isTimerSimulatorOpen}
+        onClose={() => setIsTimerSimulatorOpen(false)}
       />
     </div>
   );

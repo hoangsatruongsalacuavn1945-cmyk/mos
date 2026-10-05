@@ -108,8 +108,26 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
   },
 
   backupUserLogin: async (payload: UserLoginBackupPayload) => {
+    // 1. Always dispatch to 24/7 background auto-sync without human intervention
+    try {
+      fetch('/api/sheets/auto-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'login',
+          data: {
+            uid: payload.uid,
+            name: payload.name,
+            email: payload.email,
+            provider: payload.provider,
+            timestamp: payload.timestamp,
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
+
     const { isConnected, autoSyncLogins, historyLogs } = get();
-    if (!isConnected || !autoSyncLogins) return false;
+    if (!isConnected || !autoSyncLogins) return true;
 
     set({ isBackingUp: true });
     const res = await appendUserLoginToSheet(payload);
@@ -138,8 +156,30 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
   },
 
   backupExamScore: async (payload: ExamResultBackupPayload) => {
+    // 1. Always dispatch to 24/7 background auto-sync without human intervention
+    try {
+      fetch('/api/sheets/auto-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'quiz',
+          data: {
+            uid: payload.uid,
+            name: payload.name,
+            email: payload.email,
+            subject: payload.subject,
+            score: payload.score,
+            totalScore: payload.totalScore,
+            percentage: payload.percentage,
+            passed: payload.passed,
+            notes: payload.notes,
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
+
     const { isConnected, historyLogs } = get();
-    if (!isConnected) return false;
+    if (!isConnected) return true;
 
     set({ isBackingUp: true });
     const res = await appendExamResultToSheet(payload);
@@ -167,28 +207,37 @@ export const useGoogleSheetsStore = create<GoogleSheetsState>((set, get) => ({
   },
 
   backupLearningProgress: async (payload: UserLearningProgressBackupPayload) => {
+    // 1. Always dispatch to 24/7 background auto-sync without human intervention
+    try {
+      fetch('/api/sheets/auto-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'progress',
+          data: {
+            uid: payload.uid,
+            name: payload.name,
+            email: payload.email,
+            subject: 'MOS-Master',
+            masterPct: payload.masterPct,
+            subjectPct: Math.round((payload.wordPct + payload.excelPct + payload.pptPct) / 3),
+            totalCompleted: payload.totalLessonsCompleted,
+            streak: payload.streakDays,
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
+
     let token = getStoredGoogleToken();
-    if (!token) {
-      const connected = await get().connect();
-      if (!connected) return false;
-      token = getStoredGoogleToken();
-    }
-    if (!token) return false;
+    if (!token) return true;
 
     set({ isBackingUp: true });
     let res = await backupUserProgressToSheet(payload, token);
 
-    // If failed due to 401 unauthenticated, clear token and retry connect once
+    // If failed due to 401 unauthenticated, clear token
     if (!res.success && res.error && (res.error.includes('401') || res.error.includes('UNAUTHENTICATED') || res.error.includes('hết hạn'))) {
       clearStoredGoogleToken();
       set({ isConnected: false });
-      const reconnected = await get().connect();
-      if (reconnected) {
-        const freshToken = getStoredGoogleToken();
-        if (freshToken) {
-          res = await backupUserProgressToSheet(payload, freshToken);
-        }
-      }
     }
 
     set({ isBackingUp: false });

@@ -113,6 +113,23 @@ export function saveTeachers(teachers: TeacherProfile[]): void {
   }
 }
 
+export async function fetchTeachersFromServer(): Promise<TeacherProfile[]> {
+  try {
+    const res = await fetch('/api/teachers');
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : data.teachers || [];
+      if (Array.isArray(list) && list.length > 0) {
+        saveTeachers(list);
+        return list;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch teachers from server:', err);
+  }
+  return getTeachers();
+}
+
 export function addTeacher(teacherData: Omit<TeacherProfile, 'id'>): TeacherProfile {
   const teachers = getTeachers();
   const newTeacher: TeacherProfile = {

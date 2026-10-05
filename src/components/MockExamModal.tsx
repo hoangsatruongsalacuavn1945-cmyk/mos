@@ -7,6 +7,7 @@ import { soundManager } from '../utils/audio';
 import { unifiedLoggingService } from '../services/unifiedLoggingService';
 import { shuffleArray } from '../utils/shuffle';
 import confetti from 'canvas-confetti';
+import { ExamCountdownTimer } from './exam/ExamCountdownTimer';
 import { 
   Clock, 
   Award, 
@@ -61,16 +62,7 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong' | 'marked'>('all');
   const [assignedTeacher, setAssignedTeacher] = useState<any>(null);
 
-  // Timer countdown without updater side-effects
-  useEffect(() => {
-    if (isSubmitted) return;
-
-    const timer = setInterval(() => {
-      setTimeLeftSeconds(prev => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isSubmitted]);
+  // Auto-submit when timer expires
 
   // Clean auto-submit when timer expires
   useEffect(() => {
@@ -242,22 +234,23 @@ export const MockExamModal: React.FC<MockExamModalProps> = ({
           </div>
 
           {!isSubmitted && (
-            <div className="flex items-center gap-4">
-              {/* Countdown timer */}
-              <div
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono font-bold text-sm ${
-                  timeLeftSeconds < 300
-                    ? 'bg-red-950 text-red-400 border-red-800 animate-pulse'
-                    : 'bg-slate-900 text-blue-400 border-slate-800'
-                }`}
-              >
-                <Clock className="w-4 h-4" />
-                <span>{formatTime(timeLeftSeconds)}</span>
-              </div>
+            <div className="flex items-center gap-3">
+              {/* Authentic Certiport Countdown Timer with Pause/Resume */}
+              <ExamCountdownTimer
+                initialSeconds={50 * 60}
+                currentSeconds={timeLeftSeconds}
+                onTick={(t) => setTimeLeftSeconds(t)}
+                onExpire={handleSubmitExam}
+                variant="hud"
+                allowPause={true}
+                totalTasks={examPool.length}
+                completedTasks={Object.keys(userAnswers).length}
+                examTitle={`Kỳ Thi Thử MOS ${selectedSubject.toUpperCase()}`}
+              />
 
               <button
                 onClick={() => setShowConfirmSubmit(true)}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 shadow-sm"
               >
                 Nộp Bài Thi
               </button>

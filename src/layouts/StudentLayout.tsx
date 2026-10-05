@@ -5,6 +5,7 @@ import { useLanguageStore } from '../utils/languageStore';
 import { soundManager } from '../utils/audio';
 import { ThemeLanguageSwitcher } from '../components/ThemeLanguageSwitcher';
 import { FloatingFeedbackButton } from '../components/FloatingFeedbackButton';
+import { NavigationSidebar } from '../components/NavigationSidebar';
 import { 
   Award, 
   BookOpen, 
@@ -23,7 +24,9 @@ import {
   UserPlus,
   Volume2,
   VolumeX,
-  ExternalLink
+  ExternalLink,
+  TrendingUp,
+  Menu
 } from 'lucide-react';
 
 export const StudentLayout: React.FC = () => {
@@ -32,6 +35,8 @@ export const StudentLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isAudioMuted, setIsAudioMuted] = useState(soundManager.getMuted());
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const isTeacherOrAdmin = user.role === 'teacher' || user.role === 'admin';
 
@@ -44,60 +49,82 @@ export const StudentLayout: React.FC = () => {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col text-slate-800 dark:text-slate-100 font-sans selection:bg-blue-100 selection:text-blue-900 transition-colors duration-200">
       {/* Student Public Header */}
       <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-2xs transition-colors duration-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           
-          {/* Logo & Platform Info */}
-          <Link to="/" className="flex items-center gap-3 shrink-0 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black text-lg shadow-sm group-hover:scale-105 transition-transform">
-              M
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider">
-                <span>{t('certiportStandard')}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              </div>
-              <div className="text-base font-black text-slate-900 dark:text-white tracking-tight leading-none mt-0.5">
-                {t('platformTitle')}
-              </div>
-            </div>
-          </Link>
+          {/* Left: Mobile Menu Toggle & Logo */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setIsMobileNavOpen(true)}
+              className="lg:hidden p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Mở thanh điều hướng"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
 
-          {/* Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-1">
+            <Link to="/" className="flex items-center gap-3 shrink-0 group">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black text-lg shadow-sm group-hover:scale-105 transition-transform">
+                M
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider">
+                  <span>{t('certiportStandard')}</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <div className="text-base font-black text-slate-900 dark:text-white tracking-tight leading-none mt-0.5">
+                  {t('platformTitle')}
+                </div>
+              </div>
+            </Link>
+          </div>
+
+          {/* Top Quick Links (Desktop) */}
+          <nav className="hidden md:flex items-center gap-1">
             <Link
-              to="/"
+              to="/courses"
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${
-                location.pathname === '/' 
+                location.pathname === '/' || location.pathname === '/courses'
                   ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' 
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               <BookOpen className="w-4 h-4" />
-              <span>{t('navTraining')}</span>
+              <span>Courses</span>
             </Link>
 
             <Link
               to="/thi-thu"
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 ${
-                location.pathname === '/thi-thu' 
+                location.pathname === '/thi-thu' || location.pathname === '/practice-tests'
                   ? 'bg-blue-600 text-white shadow-xs' 
                   : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/60'
               }`}
             >
               <Award className="w-4 h-4" />
-              <span>{t('navMockExam')}</span>
+              <span>Practice Tests</span>
             </Link>
 
             <Link
-              to="/ket-qua"
+              to="/tien-do"
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${
-                location.pathname === '/ket-qua' 
+                location.pathname === '/tien-do' || location.pathname === '/dashboard' || location.pathname === '/progress'
                   ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' 
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
-              <BarChart2 className="w-4 h-4" />
-              <span>{t('navResults')}</span>
+              <TrendingUp className="w-4 h-4" />
+              <span>Dashboard</span>
+            </Link>
+
+            <Link
+              to="/profile"
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${
+                location.pathname === '/profile' || location.pathname === '/ho-so'
+                  ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' 
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <User className="w-4 h-4" />
+              <span>Profile</span>
             </Link>
           </nav>
 
@@ -106,7 +133,7 @@ export const StudentLayout: React.FC = () => {
             {/* Audio Toggle */}
             <button
               onClick={handleToggleAudio}
-              className={`p-2 rounded-xl border transition-colors ${
+              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                 isAudioMuted 
                   ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700' 
                   : 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800'
@@ -139,7 +166,7 @@ export const StudentLayout: React.FC = () => {
                     logout();
                     navigate('/');
                   }}
-                  className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
                   title={t('logout')}
                 >
                   <LogOut className="w-4 h-4" />
@@ -148,12 +175,16 @@ export const StudentLayout: React.FC = () => {
             ) : (
               /* Public user buttons */
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <div className="flex items-center gap-2 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                <Link
+                  to="/profile"
+                  className="flex items-center gap-2 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-xl border border-slate-200 dark:border-slate-700 text-xs transition-colors"
+                  title="Hồ sơ học viên"
+                >
                   <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[10px]">
                     {user.name.charAt(0)}
                   </div>
                   <span className="font-semibold text-slate-700 dark:text-slate-300 hidden sm:inline">{user.name}</span>
-                </div>
+                </Link>
 
                 <Link
                   to="/register"
@@ -178,30 +209,43 @@ export const StudentLayout: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Public Body */}
-      <main className="flex-1">
-        <Outlet />
-      </main>
+      {/* Main Layout Container with Sidebar and Content */}
+      <div className="flex-1 flex w-full">
+        {/* Navigation Sidebar Component */}
+        <NavigationSidebar
+          isOpenMobile={isMobileNavOpen}
+          onCloseMobile={() => setIsMobileNavOpen(false)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        />
+
+        {/* Content Area */}
+        <div className="flex-1 min-w-0 flex flex-col bg-slate-50 dark:bg-slate-950 transition-colors">
+          <main className="flex-1">
+            <Outlet />
+          </main>
+
+          {/* Student Public Footer */}
+          <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-6 px-4 sm:px-6 text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 dark:text-slate-200">MOS Master Platform</span>
+                <span>· Chuẩn Khảo Thí Tin Học Quốc Tế Microsoft Office Specialist (MO-100 / MO-200 / MO-300)</span>
+              </div>
+              <div className="flex items-center gap-4 text-[11px]">
+                <span>{t('passStandard')}</span>
+                <span>·</span>
+                <Link to="/login" className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline">
+                  {t('officerPortal')}
+                </Link>
+              </div>
+            </div>
+          </footer>
+        </div>
+      </div>
 
       {/* Floating Website Rating & Bug Report Launcher */}
       <FloatingFeedbackButton />
-
-      {/* Student Public Footer */}
-      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-6 px-4 sm:px-6 text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800 dark:text-slate-200">MOS Master Platform</span>
-            <span>· Chuẩn Khảo Thí Tin Học Quốc Tế Microsoft Office Specialist (MO-100 / MO-200 / MO-300)</span>
-          </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>{t('passStandard')}</span>
-            <span>·</span>
-            <Link to="/login" className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline">
-              {t('officerPortal')}
-            </Link>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };
